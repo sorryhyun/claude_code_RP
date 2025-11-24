@@ -1,4 +1,4 @@
-# ChitChats
+# Claude Code Role Play
 
 Claude Code 설치만으로 사용 가능한 RP 툴입니다. (pro/max 구독 인증해주세요!)
 
