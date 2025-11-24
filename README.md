@@ -1,6 +1,6 @@
-# ChitChats
+# Claude Code Role Play
 
-A real-time multi-agent chat application where multiple Claude AI personalities interact in shared rooms.
+A real-time multi-CC(Claude code) chat application where multiple AI personalities interact in shared rooms.
 
 ## Features
 
