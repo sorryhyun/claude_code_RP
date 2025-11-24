@@ -1,0 +1,400 @@
+"""
+Agent manager for handling Claude SDK client lifecycle and response generation.
+
+This module provides the AgentManager class which orchestrates agent responses,
+manages client interruption, and handles conversation sessions.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from typing import AsyncIterator
+
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from config.config_loader import (
+    get_debug_config,
+    get_tool_names_by_group,
+)
+from config.constants import BUILTIN_TOOLS, MAX_THINKING_TOKENS
+from config.parser import GUIDELINE_READ_MODE
+from core import get_settings
+from domain.contexts import AgentResponseContext
+from domain.task_identifier import TaskIdentifier
+from utils.debug_logger import append_response_to_debug_log, write_debug_log
+from utils.debug_utils import format_message_for_debug
+
+from .client_pool import ClientPool
+from .stream_parser import StreamParser
+from .tools import create_action_mcp_server, create_guidelines_mcp_server
+
+# Get settings singleton
+_settings = get_settings()
+
+# Configure from settings
+DEBUG_MODE = get_debug_config().get("debug", {}).get("enabled", False)
+USE_HAIKU = _settings.use_haiku
+
+# Suppress apscheduler debug/info logs
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
+logger = logging.getLogger("AgentManager")
+
+
+class AgentManager:
+    """Manages Claude SDK clients for agent response generation and interruption."""
+
+    def __init__(self):
+        # Note: Authentication can be configured in two ways:
+        # 1. Set CLAUDE_API_KEY environment variable with your Anthropic API key
+        # 2. Use Claude Code web authentication (when running through Claude Code with subscription)
+        # If CLAUDE_API_KEY is not set, the SDK will use Claude Code authentication.
+        self.active_clients: dict[TaskIdentifier, ClaudeSDKClient] = {}
+        # Client pool for managing SDK client lifecycle
+        self.client_pool = ClientPool()
+        # Stream parser for SDK message parsing
+        self.stream_parser = StreamParser()
+
+    async def interrupt_all(self):
+        """Interrupt all currently active agent responses."""
+        logger.info(f"🛑 Interrupting {len(self.active_clients)} active agent(s)")
+        for task_id, client in list(self.active_clients.items()):
+            try:
+                await client.interrupt()
+                logger.debug(f"Interrupted task: {task_id}")
+            except Exception as e:
+                logger.warning(f"Failed to interrupt task {task_id}: {e}")
+        # Clear the active clients after interruption
+        self.active_clients.clear()
+
+    async def shutdown(self):
+        """
+        Gracefully shutdown all pooled clients and wait for cleanup tasks to complete.
+        Should be called during application shutdown.
+        """
+        logger.info("🛑 Shutting down AgentManager")
+
+        # Delegate to client pool
+        await self.client_pool.shutdown_all()
+
+        logger.info("✅ AgentManager shutdown complete")
+
+    async def interrupt_room(self, room_id: int):
+        """Interrupt all agents responding in a specific room."""
+        logger.info(f"🛑 Interrupting agents in room {room_id}")
+        tasks_to_interrupt = [task_id for task_id in self.active_clients.keys() if task_id.room_id == room_id]
+        for task_id in tasks_to_interrupt:
+            try:
+                client = self.active_clients.get(task_id)
+                if client:
+                    await client.interrupt()
+                    logger.debug(f"Interrupted task: {task_id}")
+                    del self.active_clients[task_id]
+            except Exception as e:
+                logger.warning(f"Failed to interrupt task {task_id}: {e}")
+
+    def _build_agent_options(self, context: AgentResponseContext, final_system_prompt: str) -> ClaudeAgentOptions:
+        """Build Claude Agent SDK options for the agent."""
+        # Start with built-in tools to disallow (from config.constants)
+        disallowed_tools = BUILTIN_TOOLS.copy()
+
+        # Create action MCP server with skip, memorize, and optionally recall tools
+        logger.debug(f"Creating action MCP server for agent: '{context.agent_name}'")
+        action_mcp_server = create_action_mcp_server(
+            agent_name=context.agent_name,
+            agent_id=context.agent_id,
+            config_file=context.config.config_file,
+            long_term_memory_index=context.config.long_term_memory_index,
+        )
+
+        # Create guidelines MCP server (handles both DESCRIPTION and ACTIVE_TOOL modes)
+        # - DESCRIPTION mode: Guidelines passively injected via tool description
+        # - ACTIVE_TOOL mode: Agents call mcp__guidelines__read to retrieve guidelines
+        logger.debug(f"Creating guidelines MCP server for agent: '{context.agent_name}' (mode: {GUIDELINE_READ_MODE})")
+        guidelines_mcp_server = create_guidelines_mcp_server(
+            agent_name=context.agent_name, has_situation_builder=context.has_situation_builder
+        )
+
+        # Build allowed tools list using group-based approach
+        allowed_tool_names = [*get_tool_names_by_group("guidelines"), *get_tool_names_by_group("action")]
+
+        # Build MCP servers dict
+        mcp_servers = {
+            "guidelines": guidelines_mcp_server,
+            "action": action_mcp_server,
+        }
+
+        options = ClaudeAgentOptions(
+            model="claude-sonnet-4-5-20250929"
+            if not USE_HAIKU
+            else "claude-haiku-4-5-20251001",  # "claude-opus-4-1-20250805"
+            system_prompt=final_system_prompt,
+            disallowed_tools=disallowed_tools,
+            permission_mode="default",
+            max_thinking_tokens=MAX_THINKING_TOKENS,
+            mcp_servers=mcp_servers,
+            allowed_tools=allowed_tool_names,
+            setting_sources=[],
+            cwd="/tmp/claude-empty",
+        )
+
+        if context.session_id:
+            options.resume = context.session_id
+
+        return options
+
+    async def generate_sdk_response(self, context: AgentResponseContext) -> AsyncIterator[dict]:
+        """
+        Generate a response from an agent using Claude Agent SDK with session persistence.
+        This is an async generator that yields streaming events as the response is generated.
+        Agent can choose to skip responding by calling the 'skip' tool.
+        Agent can record memories by calling the 'memorize' tool (if ENABLE_MEMORY_TOOL=true).
+
+        Args:
+            context: AgentResponseContext containing all parameters for response generation
+
+        Yields:
+            Streaming events:
+            - {"type": "stream_start", "temp_id": str, "agent_id": int, ...}
+            - {"type": "content_delta", "delta": str}
+            - {"type": "thinking_delta", "delta": str}
+            - {"type": "stream_end", "response_text": Optional[str], "thinking_text": str,
+               "session_id": str, "memory_entries": list[str]}
+        """
+
+        # Create task identifier from room and agent IDs
+        task_id = context.task_id or TaskIdentifier(room_id=context.room_id, agent_id=context.agent_id)
+
+        # Generate a temporary ID for this streaming response
+        temp_id = f"temp_{task_id}_{uuid.uuid4().hex[:8]}"
+
+        # Log what the agent is receiving
+        logger.info(
+            f"🤖 Agent generating response | Session: {context.session_id or 'NEW'} | Task: {task_id} | Temp ID: {temp_id}"
+        )
+        logger.debug(f"System prompt (first 100 chars): {context.system_prompt[:100]}...")
+        logger.debug(f"User message: {context.user_message}")
+        if context.conversation_history:
+            logger.debug(f"Conversation history (length): {len(context.conversation_history)} chars")
+
+        try:
+            # Yield stream_start event
+            yield {
+                "type": "stream_start",
+                "temp_id": temp_id,
+            }
+
+            # Build final system prompt
+            final_system_prompt = context.system_prompt
+            if context.conversation_started:
+                final_system_prompt = (
+                    f"{context.system_prompt}\n\n---\n\nConversation started on: {context.conversation_started}"
+                )
+
+            # Build agent options
+            options = self._build_agent_options(context, final_system_prompt)
+
+            response_text = ""
+            thinking_text = ""
+            new_session_id = context.session_id
+            skip_tool_called = False
+            memory_entries = []  # Track memory entries from memorize tool calls
+
+            # Build the message with conversation history if provided
+            message_to_send = context.user_message
+            if context.conversation_history:
+                message_to_send = f"{context.conversation_history}\n\n{context.user_message}"
+
+            # Get or create client from pool (reuses client for same room-agent pair)
+            # This prevents creating hundreds of agent session files
+            pool_key = task_id
+            client, _ = await self.client_pool.get_or_create(pool_key, options)
+
+            # Register this client for interruption support
+            self.active_clients[task_id] = client
+            logger.debug(f"Registered client for task: {task_id}")
+
+            # Write debug log with complete agent input
+            await write_debug_log(
+                agent_name=context.agent_name,
+                task_id=str(task_id),
+                system_prompt=final_system_prompt,
+                message_to_send=message_to_send,
+                config_data={
+                    "in_a_nutshell": context.config.in_a_nutshell,
+                    "characteristics": context.config.characteristics,
+                    "recent_events": context.config.recent_events,
+                },
+                options=options,
+                has_situation_builder=context.has_situation_builder,
+            )
+
+            # Send the message via query() - this is the correct SDK pattern
+            logger.info(
+                f"📤 Sending message to agent | Task: {context.task_id} | Message length: {len(message_to_send)}"
+            )
+
+            try:
+                # Add timeout to query to prevent hanging
+                await asyncio.wait_for(client.query(message_to_send), timeout=10.0)
+                logger.info(f"📬 Message sent, waiting for response | Task: {context.task_id}")
+            except asyncio.TimeoutError:
+                logger.error(f"⏰ Timeout sending message to agent | Task: {context.task_id}")
+                raise Exception("Timeout sending message to agent")
+
+            # Receive and stream the response
+            async for message in client.receive_response():
+                # Parse the message using StreamParser
+                parsed = self.stream_parser.parse_message(message, response_text, thinking_text)
+
+                # Calculate deltas for yielding
+                content_delta = parsed.response_text[len(response_text) :]
+                thinking_delta = parsed.thinking_text[len(thinking_text) :]
+
+                # Update session if found
+                if parsed.session_id:
+                    new_session_id = parsed.session_id
+
+                # Update skip flag
+                if parsed.skip_used:
+                    skip_tool_called = True
+
+                # Collect memory entries
+                memory_entries.extend(parsed.memory_entries)
+
+                # Update accumulated text
+                response_text = parsed.response_text
+                thinking_text = parsed.thinking_text
+
+                # Yield delta events for content and thinking
+                if content_delta:
+                    logger.info(f"🔄 YIELDING content delta | Length: {len(content_delta)}")
+                    yield {
+                        "type": "content_delta",
+                        "delta": content_delta,
+                        "temp_id": temp_id,
+                    }
+
+                if thinking_delta:
+                    logger.info(f"🔄 YIELDING thinking delta | Length: {len(thinking_delta)}")
+                    yield {
+                        "type": "thinking_delta",
+                        "delta": thinking_delta,
+                        "temp_id": temp_id,
+                    }
+
+                # Debug log each message received from the SDK
+                # Configuration loaded from debug.yaml
+                if DEBUG_MODE:
+                    # Get streaming config from debug.yaml
+                    config = get_debug_config()
+                    streaming_config = config.get("debug", {}).get("logging", {}).get("streaming", {})
+
+                    if streaming_config.get("enabled", True):
+                        # Skip system init messages if configured
+                        is_system_init = (
+                            message.__class__.__name__ == "SystemMessage"
+                            and hasattr(message, "subtype")
+                            and message.subtype == "init"
+                        )
+                        skip_system_init = streaming_config.get("skip_system_init", True)
+
+                        if not (is_system_init and skip_system_init):
+                            logger.debug(f"📨 Received message:\n{format_message_for_debug(message)}")
+
+            # Unregister the client when done
+            if context.task_id and context.task_id in self.active_clients:
+                del self.active_clients[context.task_id]
+                logger.debug(f"Unregistered client for task: {context.task_id}")
+
+            # Log response summary
+            final_response = response_text if response_text else None
+            if skip_tool_called:
+                logger.info(f"⏭️  Agent skipped | Session: {new_session_id}")
+                final_response = None
+            else:
+                logger.info(
+                    f"✅ Response generated | Length: {len(response_text)} chars | Thinking: {len(thinking_text)} chars | Session: {new_session_id}"
+                )
+            if memory_entries:
+                logger.info(f"💾 Recorded {len(memory_entries)} memory entries")
+
+            # Append response to debug log
+            append_response_to_debug_log(
+                agent_name=context.agent_name,
+                task_id=context.task_id or "default",
+                response_text=final_response or "",
+                thinking_text=thinking_text,
+                skipped=skip_tool_called,
+            )
+
+            # Yield stream_end event with final data
+            yield {
+                "type": "stream_end",
+                "temp_id": temp_id,
+                "response_text": final_response,
+                "thinking_text": thinking_text,
+                "session_id": new_session_id,
+                "memory_entries": memory_entries,
+                "skipped": skip_tool_called,
+            }
+
+        except asyncio.CancelledError:
+            # Task was cancelled due to interruption - this is expected
+            # Clean up client from active_clients (but keep it in pool for reuse)
+            if context.task_id and context.task_id in self.active_clients:
+                del self.active_clients[context.task_id]
+                logger.debug(f"Unregistered client for task (interrupted): {context.task_id}")
+
+            logger.info(f"🛑 Agent response interrupted | Task: {context.task_id}")
+            # Yield stream_end to indicate interruption
+            yield {
+                "type": "stream_end",
+                "temp_id": temp_id,
+                "response_text": None,
+                "thinking_text": "",
+                "session_id": context.session_id,
+                "memory_entries": [],
+                "skipped": True,
+            }
+
+        except Exception as e:
+            # Clean up client on error
+            if context.task_id and context.task_id in self.active_clients:
+                del self.active_clients[context.task_id]
+                logger.debug(f"Unregistered client for task (error cleanup): {context.task_id}")
+
+            # Check if this is an interruption-related error
+            error_str = str(e).lower()
+            if "interrupt" in error_str or "cancelled" in error_str:
+                logger.info(f"🛑 Agent response interrupted | Task: {context.task_id}")
+                # Yield stream_end to indicate interruption
+                yield {
+                    "type": "stream_end",
+                    "temp_id": temp_id,
+                    "response_text": None,
+                    "thinking_text": "",
+                    "session_id": context.session_id,
+                    "memory_entries": [],
+                    "skipped": True,
+                }
+                return
+
+            # Remove client from pool on any error to ensure fresh client next time
+            # task_id was already created at the beginning of the function
+            if task_id in self.client_pool.pool:
+                # Use cleanup to properly disconnect in background task
+                await self.client_pool.cleanup(task_id)
+
+            logger.error(f"❌ Error generating response: {str(e)}", exc_info=DEBUG_MODE)
+            # Yield error as stream_end
+            yield {
+                "type": "stream_end",
+                "temp_id": temp_id,
+                "response_text": f"Error generating response: {str(e)}",
+                "thinking_text": "",
+                "session_id": context.session_id,
+                "memory_entries": [],
+                "skipped": False,
+            }

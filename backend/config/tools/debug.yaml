@@ -1,0 +1,55 @@
+# Debug Logging Configuration
+# This file controls debug logging behavior for agent interactions
+# Changes to this file apply immediately (hot-reloaded)
+
+debug:
+  # Enable/disable debug mode
+  # Can be overridden by DEBUG_AGENTS environment variable
+  enabled: false
+
+  # Output file location (relative to backend directory)
+  output_file: "debug.txt"
+
+  # What to log in the debug output
+  logging:
+    # Log the complete input sent to the agent
+    input:
+      system_prompt: true
+      tool_descriptions: true
+      message_content: true
+      agent_config: true
+
+    # Log streaming messages during agent response
+    streaming:
+      enabled: true
+      # Skip system initialization messages (reduces noise)
+      skip_system_init: true
+      # Skip tool description messages
+      skip_tool_descriptions: false
+
+    # Log the agent's response
+    output:
+      response_text: true
+      thinking_text: true
+      skipped_status: true
+
+  # Message formatting options
+  formatting:
+    # Truncate long strings to prevent massive logs
+    truncate_strings: true
+    max_string_length: 500
+    # Include signature fields in serialized objects
+    include_signatures: false
+
+  # Log file format
+  format:
+    # Include timestamp in each log entry
+    timestamp: true
+    # Separator character for log sections
+    separator: "="
+    # Length of separator line
+    separator_length: 80
+    # Include agent name in log entries
+    include_agent_name: true
+    # Include task/session ID in log entries
+    include_task_id: true

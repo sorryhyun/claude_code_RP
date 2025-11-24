@@ -1,0 +1,51 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env
+*.db
+*.sqlite
+*.sqlite3
+test_*.txt
+.python-version
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.production.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+debug.txt
+
+# Simulation outputs
+chatroom_*.txt
+
+# Evaluation outputs
+test_res/
+checklists_*.yaml
+answers_*.yaml
+evaluation_*.yaml
+report_*.md
+
+key.pem
+backend/chitchats.db-shm
+backend/chitchats.db-wal
+/backend/.coverage
+.coverage
+coverage.json
+htmlcov/

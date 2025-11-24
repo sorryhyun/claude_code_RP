@@ -1,0 +1,123 @@
+"""
+CRUD operations for Room-Agent relationships and sessions.
+"""
+
+from datetime import datetime
+from typing import List, Optional
+
+import models
+from sqlalchemy import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+
+from .helpers import get_room_with_relationships
+
+
+async def get_agents(db: AsyncSession, room_id: int) -> List[models.Agent]:
+    """Get all agents in a specific room."""
+    # Query agents directly via join to avoid detached instance issues with cached objects
+    result = await db.execute(
+        select(models.Agent).join(models.room_agents).where(models.room_agents.c.room_id == room_id)
+    )
+    return list(result.scalars().all())
+
+
+async def add_agent_to_room(db: AsyncSession, room_id: int, agent_id: int) -> Optional[models.Room]:
+    """Add an existing agent to a room with invitation tracking."""
+    room = await get_room_with_relationships(db, room_id)
+
+    agent_result = await db.execute(select(models.Agent).where(models.Agent.id == agent_id))
+    agent = agent_result.scalar_one_or_none()
+
+    if room and agent:
+        if agent not in room.agents:
+            # Check if room has existing messages (mid-conversation addition)
+            has_messages = len(room.messages) > 0
+
+            # Insert into room_agents with joined_at timestamp
+            joined_at = datetime.utcnow()
+            await db.execute(insert(models.room_agents).values(room_id=room_id, agent_id=agent_id, joined_at=joined_at))
+            await db.commit()
+
+            # Only create system message if this is a mid-conversation addition
+            if has_messages:
+                from crud.messages import create_system_message
+
+                await create_system_message(db, room_id, f"{agent.name} joined the chat")
+
+            # Refresh room to get updated agents and messages
+            await db.refresh(room, attribute_names=["agents", "messages"])
+
+            # Invalidate room agents cache
+            from utils.cache import get_cache, room_agents_key
+
+            cache = get_cache()
+            cache.invalidate(room_agents_key(room_id))
+
+        return room
+    return None
+
+
+async def remove_agent_from_room(db: AsyncSession, room_id: int, agent_id: int) -> bool:
+    """Remove an agent from a room (agent still exists globally)."""
+    room_result = await db.execute(
+        select(models.Room).options(selectinload(models.Room.agents)).where(models.Room.id == room_id)
+    )
+    room = room_result.scalar_one_or_none()
+
+    if room:
+        agent_to_remove = None
+        for agent in room.agents:
+            if agent.id == agent_id:
+                agent_to_remove = agent
+                break
+
+        if agent_to_remove:
+            room.agents.remove(agent_to_remove)
+            await db.commit()
+
+            # Invalidate room agents cache
+            from utils.cache import get_cache, room_agents_key
+
+            cache = get_cache()
+            cache.invalidate(room_agents_key(room_id))
+
+            return True
+    return False
+
+
+async def get_room_agent_session(db: AsyncSession, room_id: int, agent_id: int) -> Optional[str]:
+    """Get the session_id for a specific agent in a specific room."""
+    result = await db.execute(
+        select(models.RoomAgentSession).where(
+            models.RoomAgentSession.room_id == room_id, models.RoomAgentSession.agent_id == agent_id
+        )
+    )
+    session = result.scalar_one_or_none()
+    return session.session_id if session else None
+
+
+async def update_room_agent_session(
+    db: AsyncSession, room_id: int, agent_id: int, session_id: str
+) -> models.RoomAgentSession:
+    """Update or create a session_id for a specific agent in a specific room."""
+    result = await db.execute(
+        select(models.RoomAgentSession).where(
+            models.RoomAgentSession.room_id == room_id, models.RoomAgentSession.agent_id == agent_id
+        )
+    )
+    session = result.scalar_one_or_none()
+
+    if session:
+        # Update existing session
+        session.session_id = session_id
+        session.updated_at = datetime.utcnow()
+    else:
+        # Create new session
+        session = models.RoomAgentSession(room_id=room_id, agent_id=agent_id, session_id=session_id)
+        db.add(session)
+
+    await db.commit()
+    await db.refresh(session)
+    return session

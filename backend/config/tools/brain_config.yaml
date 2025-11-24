@@ -1,0 +1,140 @@
+# Brain Configuration
+# This file consolidates memory brain tool and context configurations
+# Changes to this file apply immediately (hot-reloaded)
+
+# Memory selection tools configuration
+memory_selection_tools:
+  # Tool: select_memory
+  select_memory:
+    enabled: true
+    description: |
+      Select a memory to surface for this character.
+
+      Call this tool for each memory that you determine should naturally surface in this moment.
+      You can select up to {max_memories} memories.
+
+      Provide:
+      - memory_id: The ID of the memory to activate
+      - activation_strength: How strongly this memory surfaces (0.0 to 1.0)
+        - 1.0 = Very strong, vivid recollection
+        - 0.7-0.9 = Clear memory surfacing
+        - 0.4-0.6 = Subtle, background awareness
+        - 0.1-0.3 = Faint echo or association
+      - reason: Why this memory is surfacing now (1-2 sentences)
+    input_schema:
+      memory_id:
+        type: string
+        description: ID of the memory to activate
+      activation_strength:
+        type: number
+        description: Activation strength (0.0 to 1.0)
+        minimum: 0.0
+        maximum: 1.0
+      reason:
+        type: string
+        description: Why this memory surfaces now
+    responses:
+      success: "Selected memory '{memory_id}' (strength: {activation_strength:.2f}). {remaining} more can be selected."
+      error_invalid_strength: "Error: activation_strength must be between 0.0 and 1.0 (got {activation_strength})"
+      error_max_reached: "Maximum memories ({max_memories}) already selected. You're done selecting."
+      error_not_found: "Error: Memory '{memory_id}' not found in available memories"
+      error_already_selected: "Memory '{memory_id}' already selected"
+
+# Memory policies - govern which memories surface for different character types
+memory_policies:
+  balanced:
+    name: "BALANCED"
+    description: |
+      You have a BALANCED memory selection policy.
+      - Select memories that are most contextually relevant
+      - Balance between positive and negative experiences
+      - Prioritize memories that inform current situation
+      - No particular bias toward any emotional valence
+
+  trauma_biased:
+    name: "TRAUMA-BIASED"
+    description: |
+      You have a TRAUMA-BIASED memory selection policy.
+      - Favor memories of painful, difficult, or traumatic experiences
+      - Prioritize memories that might cause emotional distress
+      - Surface past wounds and unresolved conflicts
+      - This character's mind tends to dwell on negative experiences
+      - Activation threshold: Lower for negative memories (they surface more easily)
+
+  genius_planner:
+    name: "GENIUS-PLANNER"
+    description: |
+      You have a GENIUS-PLANNER memory selection policy.
+      - Favor strategic, analytical, and planning-oriented memories
+      - Prioritize memories of past successes, learned strategies, patterns
+      - Surface tactical knowledge and problem-solving experiences
+      - This character's mind focuses on optimization and planning
+      - Activation threshold: Lower for strategic/analytical memories
+
+  optimistic:
+    name: "OPTIMISTIC"
+    description: |
+      You have an OPTIMISTIC memory selection policy.
+      - Favor positive, hopeful, and uplifting memories
+      - Prioritize memories of joy, connection, and growth
+      - Surface memories that inspire confidence and positivity
+      - This character's mind tends to focus on the bright side
+      - Activation threshold: Lower for positive memories (they surface more easily)
+
+  avoidant:
+    name: "AVOIDANT"
+    description: |
+      You have an AVOIDANT memory selection policy.
+      - Actively suppress difficult or painful memories
+      - Prioritize neutral or mildly positive memories
+      - Avoid surfacing traumatic or emotionally intense experiences
+      - This character's mind protects itself by avoiding painful topics
+      - Activation threshold: Higher for negative memories (they rarely surface)
+      - Tend to select fewer memories overall (often 0-1)
+
+# Memory context templates for brain analysis prompts
+memory_context:
+  # Template for the memory selection analysis prompt (default, no specific conversation type)
+  # Variables: {conversation_context}, {memories_section}
+  analysis_prompt: |
+    {conversation_context}
+
+    <available_memory_indices>
+    {memories_section}
+    </available_memory_indices>
+
+    Analyze this conversation and determine which memories (if any) would naturally surface in this character's mind right now. Note that you are for recalling {agent_name}'s memory, not responding to the conversation.
+
+    Use the select_memory tool for each memory that should surface. When you're done selecting memories, simply stop (no need to call any finalization tool).
+    
+  # Template for 1-on-1 conversations with user/character
+  # Variables: {conversation_context}, {memories_section}, {agent_name}, {user_name}
+  analysis_prompt_with_user: |
+    {conversation_context}
+
+    <available_memory_indices>
+    {memories_section}
+    </available_memory_indices>
+
+    Analyze this 1-on-1 conversation between {agent_name} and {user_name}. Determine which memories (if any) would naturally surface in {agent_name}'s mind right now, especially those related to {user_name} or their relationship. Note that you are for recalling {agent_name}'s memory, not responding to the conversation.
+
+    Use the select_memory tool for each memory that should surface. When you're done selecting memories, simply stop (no need to call any finalization tool).
+
+  # Template for multi-agent or situation_builder conversations
+  # Variables: {conversation_context}, {memories_section}, {agent_name}
+  analysis_prompt_with_agent: |
+    {conversation_context}
+
+    <available_memory_indices>
+    {memories_section}
+    </available_memory_indices>
+
+    Analyze this group conversation and determine which memories (if any) would naturally surface in {agent_name}'s mind right now, considering the current group dynamic and situation. Note that you are for recalling {agent_name}'s memory, not responding to the conversation.
+
+    Use the select_memory tool for each memory that should surface. When you're done selecting memories, simply stop (no need to call any finalization tool).
+  # Message to show when no memories are available
+  no_memories_message: "No long-term memories available."
+
+# Default configuration
+defaults:
+  max_memories: 7  # Maximum number of memories to surface per turn

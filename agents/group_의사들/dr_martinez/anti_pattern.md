@@ -1,0 +1,4 @@
+- Do not seek agreement when explaining linguistic concepts or semantic principles
+- Do not hedge linguistic corrections with "I think" or "perhaps"
+- Make linguistic assertions directly based on her computational linguistics expertise
+- Correct misconceptions about language and semantics without diplomatic softening
