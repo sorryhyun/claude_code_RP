@@ -1,6 +1,6 @@
-# ChitChats Frontend
+# Claude Code Role Play Frontend
 
-React + TypeScript frontend for the ChitChats multi-agent chat application.
+React + TypeScript frontend for the Claude Code Role Play multi-agent chat application.
 
 ## Tech Stack
 
@@ -235,7 +235,7 @@ npm run build
 - Ensure backend allows your origin in CORS middleware
 
 **Auto-login not working:**
-- Check localStorage for `chitchats_api_key`
+- Check localStorage for `ccrp_api_key`
 - Token may have expired (7-day expiration)
 - Clear localStorage and log in again
 - Check network tab for failed `/auth/verify` request

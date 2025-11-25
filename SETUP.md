@@ -1,6 +1,6 @@
 # Setup Guide
 
-Complete setup guide for ChitChats, covering authentication, deployment, and memory systems.
+Complete setup guide for Claude Code Role Play, covering authentication, deployment, and memory systems.
 
 ## Quick Start
 
@@ -12,7 +12,7 @@ make install
 
 ### 2. Configure Authentication
 
-ChitChats uses JWT token-based authentication with bcrypt password hashing.
+Claude Code Role Play uses JWT token-based authentication with bcrypt password hashing.
 
 **Generate password hash:**
 ```bash
@@ -60,7 +60,7 @@ Login with the password you used to generate the hash.
 
 ## Memory Systems
 
-ChitChats supports **two mutually exclusive memory modes** controlled by `MEMORY_BY` environment variable.
+Claude Code Role Play supports **two mutually exclusive memory modes** controlled by `MEMORY_BY` environment variable.
 
 ### RECALL Mode (Default)
 
@@ -212,7 +212,7 @@ Restart the backend after changing CORS settings.
 
 ## Authentication System
 
-ChitChats uses JWT token-based authentication with bcrypt password hashing.
+Claude Code Role Play uses JWT token-based authentication with bcrypt password hashing.
 
 ### How It Works
 

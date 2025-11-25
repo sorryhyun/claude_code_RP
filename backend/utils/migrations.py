@@ -1,5 +1,5 @@
 """
-Database migration utilities for ChitChats.
+Database migration utilities for Claude Code Role Play.
 
 This module provides automatic schema migration functionality to handle
 database upgrades without requiring manual deletion of the database file.

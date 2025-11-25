@@ -1,6 +1,6 @@
 # Agent Configuration Guidelines
 
-This directory contains agent configurations for ChitChats. Each agent is defined by a folder with multiple markdown files that describe different aspects of their identity and history.
+This directory contains agent configurations for Claude Code Role Play. Each agent is defined by a folder with multiple markdown files that describe different aspects of their identity and history.
 
 ## File Structure
 

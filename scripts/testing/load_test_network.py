@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Load Test Script for ChitChats Network Usage Analysis
+Load Test Script for Claude Code Role Play Network Usage Analysis
 
 Simulates multiple concurrent users polling chatrooms to measure:
 - Network bandwidth usage
@@ -436,7 +436,7 @@ async def run_load_test(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Load test ChitChats network usage", formatter_class=argparse.RawDescriptionHelpFormatter
+        description="Load test Claude Code Role Play network usage", formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument("--password", required=True, help="Password for authentication")

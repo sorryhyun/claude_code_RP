@@ -15,13 +15,13 @@ if [ -f ".env" ]; then
     # Load JWT token
     JWT_TOKEN=$(grep '^JWT_TOKEN=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
     # Load password if available
-    PASSWORD=$(grep '^CHITCHATS_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
+    PASSWORD=$(grep '^CCRP_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
 fi
 
 # Configuration
 QUESTIONS_PER_AGENT=${1:-10}  # Questions to ask each agent (default: 10)
 API_BASE="${BACKEND_URL:-http://localhost:8000}"
-PASSWORD="${PASSWORD:-${CHITCHATS_PASSWORD:-}}"  # From .env, env var, or will prompt
+PASSWORD="${PASSWORD:-${CCRP_PASSWORD:-}}"  # From .env, env var, or will prompt
 JWT_TOKEN="${JWT_TOKEN:-}"
 
 # Agents to test (can be specified as arguments after question count)

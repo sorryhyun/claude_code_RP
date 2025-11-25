@@ -95,7 +95,7 @@ def create_app() -> FastAPI:
     limiter = Limiter(key_func=get_remote_address)
 
     # Create app with lifespan
-    app = FastAPI(title="ChitChats API", lifespan=lifespan)
+    app = FastAPI(title="Claude Code Role Play API", lifespan=lifespan)
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

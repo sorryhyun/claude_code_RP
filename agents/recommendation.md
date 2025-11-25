@@ -18,7 +18,7 @@
 - **Time expressions:** Use specific time anchors ("마왕 토벌 직후", "힘멜의 장례식 날") instead of relative time ("며칠 전", "어제")
 - **Canon vs Platform:**
   - consolidated_memory.md = canon backstory from source material
-  - recent_events.md = actual ChitChats conversations only
+  - recent_events.md = actual Claude Code Role Play conversations only
 
 **Quick classification rules:**
 
@@ -121,7 +121,7 @@ These two sections both talk about the family being poor and wanting to help the
 
 **consolidated_memory.md** = Canon backstory from source material. Use specific time anchors ("마왕 토벌 직후") not relative time ("며칠 전").
 
-**recent_events.md** = Platform conversations only (auto-updated from ChitChats).
+**recent_events.md** = Platform conversations only (auto-updated from Claude Code Role Play).
 
 ## Trait vs Memory: Sharper Classification Rules
 
@@ -210,7 +210,7 @@ When multiple agents share events (e.g., 카즈마 파티 합류):
 ```markdown
 ## [플랫폼_오리지널_설정_제목]
 [Content]
-**출처:** ChitChats platform original
+**출처:** Claude Code Role Play platform original
 ```
 
 ## Revision Process
@@ -324,7 +324,7 @@ Critic은 도구 주입 패턴 분석 작업을 많이 수행했다. 도구 설�
    - ✅ GOOD: "메구밍은 마법 학교 졸업 후 폭렬마법만 쓰기로 결심했다" = decision event → consolidated_memory
 6. **Overlapping sections**: Don't have multiple sections about the same topic.
 7. **Reading order dependency**: Don't require reading sections in order.
-8. **Confusing canon backstory with platform memories**: Canon backstory events stay in consolidated_memory.md. Only ChitChats conversation memories go in recent_events.md.
+8. **Confusing canon backstory with platform memories**: Canon backstory events stay in consolidated_memory.md. Only Claude Code Role Play conversation memories go in recent_events.md.
 9. **Generic subtitles**: Don't use titles like `[과거]`, `[관계]`, `[기억]` - be specific with topic+keyword format
 10. **Wrong chunk lengths**: Too short (1-2 sentences) or too long (15+ sentences) reduces retrieval effectiveness
 

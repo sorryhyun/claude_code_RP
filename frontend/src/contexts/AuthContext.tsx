@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { setApiKey as setGlobalApiKey } from '../utils/api';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const API_KEY_STORAGE_KEY = 'chitchats_api_key';
+const API_KEY_STORAGE_KEY = 'ccrp_api_key';
 
 interface AuthContextType {
   isAuthenticated: boolean;

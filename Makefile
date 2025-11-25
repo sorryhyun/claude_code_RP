@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 
 help:
-	@echo "ChitChats - Available commands:"
+	@echo "Claude Code Role Play - Available commands:"
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev               - Run backend + frontend (local development)"

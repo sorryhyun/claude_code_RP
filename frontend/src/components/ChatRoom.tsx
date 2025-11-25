@@ -177,7 +177,7 @@ export const ChatRoom = ({ roomId, onRoomRead, onMarkRoomAsRead, onRenameRoom }:
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
           </div>
-          <h3 className="text-xl sm:text-2xl font-bold text-slate-700 mb-3 sm:mb-4">Welcome to ChitChats</h3>
+          <h3 className="text-xl sm:text-2xl font-bold text-slate-700 mb-3 sm:mb-4">Welcome to Claude Code RP</h3>
           <p className="text-slate-500 mb-2 text-sm sm:text-base">Select a chatroom or agent from the sidebar</p>
           <p className="text-slate-400 text-xs sm:text-sm">Click an agent to start a direct chat, or create a new chatroom for multiple agents</p>
         </div>

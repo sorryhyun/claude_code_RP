@@ -64,8 +64,8 @@ export const MainSidebar = ({
     <div className="w-80 sm:w-80 bg-white shadow-xl flex flex-col border-r border-slate-200 h-full">
       {/* Header */}
       <div className="pl-20 pr-4 py-4 sm:p-6 border-b border-slate-200 bg-gradient-to-r from-indigo-600 to-purple-600">
-        <h2 className="text-xl sm:text-2xl font-bold text-white mb-1">ChitChats</h2>
-        <p className="text-indigo-100 text-xs sm:text-sm">Multi-agent conversations</p>
+        <h2 className="text-xl sm:text-2xl font-bold text-white mb-1">Claude Code RP</h2>
+        <p className="text-indigo-100 text-xs sm:text-sm">Multi-agent role play</p>
       </div>
 
       {/* Tabs */}

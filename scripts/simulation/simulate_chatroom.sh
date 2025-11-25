@@ -1,5 +1,5 @@
 #!/bin/bash
-# ChitChats Chatroom Simulation Script
+# Claude Code Role Play Chatroom Simulation Script
 # Usage: ./simulate_chatroom.sh [options]
 #
 # This script simulates multi-agent chatroom conversations via curl API calls.
@@ -28,7 +28,7 @@ fi
 
 # Default configuration
 BACKEND_URL="${BACKEND_URL:-http://localhost:8000}"
-PASSWORD="${CHITCHATS_PASSWORD:-}"
+PASSWORD="${CCRP_PASSWORD:-}"
 JWT_TOKEN="${JWT_TOKEN:-}"
 SCENARIO=""
 AGENTS=""
@@ -106,7 +106,7 @@ done
 # Validate required parameters
 if [ -z "$PASSWORD" ] && [ -z "$JWT_TOKEN" ]; then
     echo -e "${RED}Error: Password or JWT token is required${NC}"
-    echo "Use -p/--password, -t/--token, set CHITCHATS_PASSWORD environment variable,"
+    echo "Use -p/--password, -t/--token, set CCRP_PASSWORD environment variable,"
     echo "or add JWT_TOKEN to .env file"
     exit 1
 fi
@@ -133,7 +133,7 @@ if [ -z "$OUTPUT_FILE" ]; then
     OUTPUT_FILE="chatroom_${n}.txt"
 fi
 
-echo -e "${BLUE}=== ChitChats Chatroom Simulation ===${NC}"
+echo -e "${BLUE}=== Claude Code Role Play Chatroom Simulation ===${NC}"
 echo "Backend: $BACKEND_URL"
 echo "Room: $ROOM_NAME"
 echo "Agents: $AGENTS"
@@ -175,7 +175,7 @@ save_config() {
     local agent_names=$2
 
     echo "================================================================================" > "$config_file"
-    echo "ChitChats System Configuration" >> "$config_file"
+    echo "Claude Code Role Play System Configuration" >> "$config_file"
     echo "================================================================================" >> "$config_file"
     echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$config_file"
     echo "Room: $ROOM_NAME" >> "$config_file"
@@ -355,7 +355,7 @@ NO_NEW_MESSAGE_COUNT=0
 # Initialize output file with header
 cat > "$OUTPUT_FILE" << EOF
 ================================================================================
-ChitChats Simulation Transcript
+Claude Code Role Play Simulation Transcript
 ================================================================================
 Room: $ROOM_NAME (ID: $ROOM_ID)
 Agents: $AGENTS

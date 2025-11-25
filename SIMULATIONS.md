@@ -71,7 +71,7 @@ The script will auto-load it. Or pass with `-t`:
 **Transcript format:**
 ```
 ================================================================================
-ChitChats Simulation Transcript
+Claude Code Role Play Simulation Transcript
 ================================================================================
 Room: Party Planning (ID: 123)
 Agents: alice,bob,charlie
@@ -170,7 +170,7 @@ export BACKEND_URL="https://your-backend.com"
 ### Save Password Securely
 
 ```bash
-export CHITCHATS_PASSWORD="your_password"
+export CCRP_PASSWORD="your_password"
 # Password won't appear in shell history
 ./scripts/simulation/simulate_chatroom.sh -s "..." -a "..."
 ```

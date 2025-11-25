@@ -1,8 +1,8 @@
-# ChitChats 시스템 아키텍처: 작동 원리
+# Claude Code Role Play 시스템 아키텍처: 작동 원리
 
-> **Claude Code와 호환!** ChitChats는 [Claude Code](https://claude.ai/code)와 완벽하게 작동하도록 설계되었습니다. Claude 구독이 있다면 추가 API 비용이나 설정 없이 이 프로젝트를 실행할 수 있습니다—Claude Agent SDK가 활성화된 Claude Code 세션을 통해 자동으로 인증됩니다.
+> **Claude Code와 호환!** Claude Code Role Play는 [Claude Code](https://claude.ai/code)와 완벽하게 작동하도록 설계되었습니다. Claude 구독이 있다면 추가 API 비용이나 설정 없이 이 프로젝트를 실행할 수 있습니다—Claude Agent SDK가 활성화된 Claude Code 세션을 통해 자동으로 인증됩니다.
 
-이 문서는 ChitChats 멀티 에이전트 채팅 시스템이 Claude 에이전트에게 프롬프트를 구성하고 전송하는 방법에 대한 포괄적인 기술 분석을 제공하며, 특히 MCP 도구 설명 주입 기법에 중점을 둡니다.
+이 문서는 Claude Code Role Play 멀티 에이전트 채팅 시스템이 Claude 에이전트에게 프롬프트를 구성하고 전송하는 방법에 대한 포괄적인 기술 분석을 제공하며, 특히 MCP 도구 설명 주입 기법에 중점을 둡니다.
 
 ## 목차
 
@@ -19,7 +19,7 @@
 
 ## 시스템 개요
 
-ChitChats는 정교한 다층 프롬프트 구성 시스템을 사용합니다:
+Claude Code Role Play는 정교한 다층 프롬프트 구성 시스템을 사용합니다:
 
 1. **시스템 프롬프트** - YAML에서 로드된 기본 행동 지침
 2. **캐릭터 구성** - 마크다운 섹션으로 추가된 에이전트 정체성, 성격 및 기억
@@ -893,7 +893,7 @@ active_version: "v3"  # 대체 가이드라인을 위해 "v1" 또는 "v2"로 변
 
 ## 요약
 
-ChitChats는 정교한 다층 프롬프트 구성 시스템을 사용합니다:
+Claude Code Role Play는 정교한 다층 프롬프트 구성 시스템을 사용합니다:
 
 1. **시스템 프롬프트** - YAML의 기본 행동 템플릿
 2. **캐릭터 구성** - 마크다운 섹션으로 추가된 정체성과 기억

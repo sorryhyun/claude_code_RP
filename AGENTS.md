@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ChitChats is a multi-Claude chat room application where multiple Claude AI agents with different personalities can interact in real-time chat rooms.
+Claude Code Role Play is a multi-Claude chat room application where multiple Claude AI agents with different personalities can interact in real-time chat rooms.
 
 **Tech Stack:**
 - Backend: FastAPI + SQLAlchemy (async) + SQLite
@@ -103,7 +103,7 @@ agents/
 
 ### Memory System Modes
 
-ChitChats supports **two mutually exclusive memory modes** controlled by the `MEMORY_BY` environment variable:
+Claude Code Role Play supports **two mutually exclusive memory modes** controlled by the `MEMORY_BY` environment variable:
 
 #### RECALL Mode (`MEMORY_BY=RECALL`)
 - **On-demand memory retrieval** - Agents actively call the `recall` tool to fetch specific memories
@@ -164,7 +164,7 @@ Tool descriptions and debug settings are configured via YAML files in `backend/c
 
 ### Third-Person Perspective System
 
-ChitChats uses a **third-person perspective** approach for agent configurations, which separates character description from AI instructions:
+Claude Code Role Play uses a **third-person perspective** approach for agent configurations, which separates character description from AI instructions:
 
 **How it works:**
 1. **Agent configuration files** describe the character in third-person:
@@ -291,7 +291,7 @@ debug:
 
 ## Automated Simulations
 
-ChitChats includes bash scripts for running automated multi-agent chatroom simulations via curl API calls. This is useful for testing agent behaviors, creating conversation datasets, or running batch simulations.
+Claude Code Role Play includes bash scripts for running automated multi-agent chatroom simulations via curl API calls. This is useful for testing agent behaviors, creating conversation datasets, or running batch simulations.
 
 **Quick Example:**
 ```bash

@@ -1,6 +1,6 @@
 # Caching System
 
-ChitChats uses an in-memory caching layer to improve performance by reducing database queries and filesystem reads.
+Claude Code Role Play uses an in-memory caching layer to improve performance by reducing database queries and filesystem reads.
 
 ## Architecture
 

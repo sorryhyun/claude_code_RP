@@ -1,6 +1,6 @@
 # Network Load Testing
 
-This script simulates multiple concurrent users to measure ChitChats' network performance under load.
+This script simulates multiple concurrent users to measure Claude Code Role Play' network performance under load.
 
 ## Quick Start
 

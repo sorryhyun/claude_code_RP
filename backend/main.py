@@ -1,5 +1,5 @@
 """
-ChitChats API - Multi-Claude chat room application.
+Claude Code Role Play API - Multi-Claude chat room application.
 
 This is the main entry point for the FastAPI application.
 All application configuration and setup is handled by the app factory.

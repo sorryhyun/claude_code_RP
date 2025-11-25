@@ -1,8 +1,8 @@
-# ChitChats System Architecture: How It Works
+# Claude Code Role Play System Architecture: How It Works
 
-> **Works with Claude Code!** ChitChats is designed to work seamlessly with [Claude Code](https://claude.ai/code). If you have a Claude subscription, you can run this project without any additional API costs or configuration—the Claude Agent SDK authenticates automatically through your active Claude Code session.
+> **Works with Claude Code!** Claude Code Role Play is designed to work seamlessly with [Claude Code](https://claude.ai/code). If you have a Claude subscription, you can run this project without any additional API costs or configuration—the Claude Agent SDK authenticates automatically through your active Claude Code session.
 
-This document provides a comprehensive technical analysis of how the ChitChats multi-agent chat system constructs and sends prompts to Claude agents, with special focus on the MCP tool description injection technique.
+This document provides a comprehensive technical analysis of how the Claude Code Role Play multi-agent chat system constructs and sends prompts to Claude agents, with special focus on the MCP tool description injection technique.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ This document provides a comprehensive technical analysis of how the ChitChats m
 
 ## System Overview
 
-ChitChats uses a sophisticated multi-layer prompt construction system:
+Claude Code Role Play uses a sophisticated multi-layer prompt construction system:
 
 1. **System Prompt** - Base behavioral instructions loaded from YAML
 2. **Character Configuration** - Agent identity, personality, and memory appended as markdown sections
@@ -893,7 +893,7 @@ Changes apply immediately - no restart needed.
 
 ## Summary
 
-ChitChats uses a sophisticated multi-layer prompt construction system:
+Claude Code Role Play uses a sophisticated multi-layer prompt construction system:
 
 1. **System Prompt** - Base behavioral template from YAML
 2. **Character Configuration** - Identity and memories appended as markdown sections

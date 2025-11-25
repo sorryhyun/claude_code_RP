@@ -1,6 +1,6 @@
 # Backend Documentation
 
-ChitChats backend: FastAPI application with SQLAlchemy (async) + SQLite for multi-agent chat orchestration using the Anthropic Claude Agent SDK.
+Claude Code Role Play backend: FastAPI application with SQLAlchemy (async) + SQLite for multi-agent chat orchestration using the Anthropic Claude Agent SDK.
 
 ## Quick Start
 

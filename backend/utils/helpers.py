@@ -1,5 +1,5 @@
 """
-General helper functions for the ChitChats backend.
+General helper functions for the Claude Code Role Play backend.
 """
 
 from domain.task_identifier import TaskIdentifier

@@ -6,7 +6,7 @@ saving/broadcasting agent messages, and handling streaming responses.
 
 ARCHITECTURE NOTE: Polling vs. Real-time Broadcasting
 ======================================================
-Most broadcast functions are no-ops because ChitChats uses HTTP polling architecture:
+Most broadcast functions are no-ops because Claude Code Role Play uses HTTP polling architecture:
 - Clients poll /api/rooms/{room_id}/messages every 2 seconds
 - No WebSocket or SSE connections for real-time updates
 - Broadcast functions are kept for backward compatibility and semantic clarity
