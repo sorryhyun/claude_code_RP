@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2, MessageSquare } from 'lucide-react';
 
 export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
@@ -25,67 +30,72 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="max-w-md w-full">
         {/* Logo/Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent mb-4">
+            <MessageSquare className="w-8 h-8 text-accent-foreground" />
+          </div>
+          <h1 className="text-4xl font-bold text-foreground mb-2">
             Claude Code RP
           </h1>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-muted-foreground">
             Multi-Agent Role Play
           </p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">
-            Welcome
-          </h2>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-              >
-                Password
-              </label>
-              <input
-                type="password"
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                placeholder="Enter your password"
-                disabled={isSubmitting}
-                autoFocus
-              />
-            </div>
-
-            {error && (
-              <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
-                <p className="text-sm text-red-600 dark:text-red-400">
-                  {error}
-                </p>
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <CardTitle className="text-2xl">Welcome</CardTitle>
+            <CardDescription>Enter your password to continue</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  type="password"
+                  id="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  disabled={isSubmitting}
+                  autoFocus
+                />
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={isSubmitting || !password.trim()}
-              className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg transition-colors"
-            >
-              {isSubmitting ? 'Logging in...' : 'Login'}
-            </button>
-          </form>
+              {error && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                  <p className="text-sm text-destructive">
+                    {error}
+                  </p>
+                </div>
+              )}
 
-          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+              <Button
+                type="submit"
+                disabled={isSubmitting || !password.trim()}
+                className="w-full bg-accent hover:bg-accent/90"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Logging in...
+                  </>
+                ) : (
+                  'Login'
+                )}
+              </Button>
+            </form>
+          </CardContent>
+          <CardFooter className="border-t border-border pt-6">
+            <p className="text-xs text-muted-foreground text-center w-full">
               Your session will be saved automatically
             </p>
-          </div>
-        </div>
+          </CardFooter>
+        </Card>
       </div>
     </div>
   );

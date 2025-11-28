@@ -9,6 +9,9 @@ import { AgentProfileModal } from './components/AgentProfileModal';
 import { Login } from './components/Login';
 import type { Agent } from './types';
 import { api } from './utils/api';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Loader2, Menu, X } from 'lucide-react';
 
 function App() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -109,8 +112,11 @@ function App() {
   // Show login screen if not authenticated
   if (authLoading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-lg md:text-xl text-gray-600">Loading...</p>
+      <div className="h-full flex items-center justify-center bg-background">
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin text-accent" />
+          <p className="text-lg text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -121,32 +127,30 @@ function App() {
 
   if (agentsLoading || roomsLoading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-lg md:text-xl text-gray-600">Loading...</p>
+      <div className="h-full flex items-center justify-center bg-background">
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin text-accent" />
+          <p className="text-lg text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex bg-slate-50 relative">
-      {/* Subtle dot pattern background */}
-      <div className="absolute inset-0 bg-grid-slate opacity-[0.05] pointer-events-none" />
+    <div className="h-full flex bg-background relative">
       {/* Mobile Hamburger Menu Button - Fixed position */}
-      <button
+      <Button
         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-3 bg-indigo-600 text-white rounded-lg shadow-lg hover:bg-indigo-700 transition-colors"
+        size="icon"
+        className="lg:hidden fixed top-4 left-4 z-50 h-12 w-12 rounded-lg shadow-lg bg-accent hover:bg-accent/90"
         aria-label="Toggle menu"
       >
         {isSidebarOpen ? (
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <X className="w-6 h-6" />
         ) : (
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
+          <Menu className="w-6 h-6" />
         )}
-      </button>
+      </Button>
 
       {/* Mobile Overlay */}
       {isSidebarOpen && (
@@ -154,7 +158,7 @@ function App() {
           role="button"
           tabIndex={0}
           aria-label="Close menu"
-          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-30 transition-opacity duration-300 ease-in-out"
+          className="lg:hidden fixed inset-0 bg-black/60 z-30 transition-opacity duration-300 ease-in-out"
           onClick={() => setIsSidebarOpen(false)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -168,11 +172,11 @@ function App() {
       {/* Main Sidebar with Tabs - Drawer on mobile */}
       <div
         ref={sidebarRef}
-        className={`
-          fixed lg:static inset-y-0 left-0 z-40
-          transform transition-transform duration-300 ease-in-out
-          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `}
+        className={cn(
+          'fixed lg:static inset-y-0 left-0 z-40',
+          'transform transition-transform duration-300 ease-in-out',
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        )}
       >
         <MainSidebar
           rooms={rooms}

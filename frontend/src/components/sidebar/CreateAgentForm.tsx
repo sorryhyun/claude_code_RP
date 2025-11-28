@@ -1,5 +1,9 @@
 import { useState } from 'react';
 import type { Agent, AgentCreate, AgentConfig } from '../../types';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 interface CreateAgentFormProps {
   availableConfigs: AgentConfig;
@@ -58,32 +62,36 @@ export const CreateAgentForm = ({
   };
 
   return (
-    <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50">
+    <div className="p-3 border-b border-sidebar-border bg-sidebar-accent/50">
       <div className="flex gap-2 mb-3">
-        <button
+        <Button
+          type="button"
           onClick={() => setCreateMode('config')}
-          className={`flex-1 px-2 sm:px-3 py-2 rounded-lg font-medium text-xs transition-all min-h-[40px] touch-manipulation ${
-            createMode === 'config'
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100 active:bg-slate-200'
-          }`}
+          variant={createMode === 'config' ? 'default' : 'outline'}
+          size="sm"
+          className={cn(
+            'flex-1',
+            createMode === 'config' && 'bg-accent hover:bg-accent/90'
+          )}
         >
           Config File
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
           onClick={() => setCreateMode('custom')}
-          className={`flex-1 px-2 sm:px-3 py-2 rounded-lg font-medium text-xs transition-all min-h-[40px] touch-manipulation ${
-            createMode === 'custom'
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100 active:bg-slate-200'
-          }`}
+          variant={createMode === 'custom' ? 'default' : 'outline'}
+          size="sm"
+          className={cn(
+            'flex-1',
+            createMode === 'custom' && 'bg-accent hover:bg-accent/90'
+          )}
         >
           Custom
-        </button>
+        </Button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3">
-        <input
+        <Input
           type="text"
           value={newAgent.name}
           onChange={(e) => {
@@ -91,7 +99,7 @@ export const CreateAgentForm = ({
             setAgentError(null);
           }}
           placeholder="Agent name"
-          className="w-full px-3 py-2.5 text-sm sm:text-base border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent min-h-[44px]"
+          className="bg-sidebar-background border-sidebar-border"
           autoFocus
         />
 
@@ -100,7 +108,7 @@ export const CreateAgentForm = ({
             <select
               value={newAgent.config_file}
               onChange={(e) => setNewAgent({ ...newAgent, config_file: e.target.value })}
-              className="w-full px-3 py-2.5 text-sm sm:text-base border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent min-h-[44px]"
+              className="w-full px-3 py-2 text-sm border rounded-md bg-sidebar-background border-sidebar-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               required
             >
               <option value="">Select a config file...</option>
@@ -111,40 +119,37 @@ export const CreateAgentForm = ({
               ))}
             </select>
             {Object.keys(availableConfigs).length === 0 && (
-              <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              <div className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1.5">
                 No config files found
               </div>
             )}
           </>
         ) : (
           <div className="space-y-2">
-            <textarea
+            <Textarea
               value={newAgent.in_a_nutshell}
               onChange={(e) => setNewAgent({ ...newAgent, in_a_nutshell: e.target.value })}
               placeholder="In a Nutshell (brief identity)"
-              className="w-full px-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg h-16 sm:h-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+              className="bg-sidebar-background border-sidebar-border h-16 resize-none text-sm"
             />
-            <textarea
+            <Textarea
               value={newAgent.characteristics}
               onChange={(e) => setNewAgent({ ...newAgent, characteristics: e.target.value })}
               placeholder="Characteristics (optional)"
-              className="w-full px-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg h-16 sm:h-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+              className="bg-sidebar-background border-sidebar-border h-16 resize-none text-sm"
             />
           </div>
         )}
 
         {agentError && (
-          <div className="text-red-600 text-xs sm:text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
             {agentError}
           </div>
         )}
 
-        <button
-          type="submit"
-          className="w-full px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 font-medium transition-colors shadow-sm min-h-[44px]"
-        >
+        <Button type="submit" className="w-full bg-accent hover:bg-accent/90">
           Create Agent
-        </button>
+        </Button>
       </form>
     </div>
   );

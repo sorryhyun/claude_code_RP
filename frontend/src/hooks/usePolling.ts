@@ -153,7 +153,7 @@ export const usePolling = (roomId: number | null): UsePollingReturn => {
           // If the chatting roster hasn't changed, avoid state churn
           const hasSameChattingAgents =
             chattingMessages.length === prevChatting.length &&
-            chattingMessages.every((msg) =>
+            chattingMessages.every((msg: { agent_id: number; agent_name: string; agent_profile_pic: string | null }) =>
               prevChatting.some((prevMsg) =>
                 prevMsg.agent_id === msg.agent_id &&
                 prevMsg.agent_name === msg.agent_name &&

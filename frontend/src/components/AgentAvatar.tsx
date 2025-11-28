@@ -1,6 +1,8 @@
 import type { Agent } from '../types';
 import { getAgentProfilePicUrl } from '../utils/api';
 import { useState } from 'react';
+import { cn } from '@/lib/utils';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 interface AgentAvatarProps {
   agent: Agent;
@@ -18,30 +20,28 @@ export const AgentAvatar = ({ agent, size = 'md', className = '', onClick }: Age
     lg: 'w-14 h-14 text-xl',
   };
 
-  const baseClasses = `rounded-full flex items-center justify-center flex-shrink-0 ${sizeClasses[size]} ${className}`;
-
   const profilePicUrl = agent.profile_pic ? getAgentProfilePicUrl(agent) : null;
 
-  if (profilePicUrl && !imageError) {
-    return (
-      <img
-        src={profilePicUrl}
-        alt={agent.name}
-        className={`${baseClasses} object-cover ${onClick ? 'cursor-pointer' : ''}`}
-        onClick={onClick}
-        title={onClick ? 'Click to change profile picture' : agent.name}
-        onError={() => setImageError(true)}
-      />
-    );
-  }
-
   return (
-    <div
-      className={`${baseClasses} bg-gradient-to-br from-emerald-400 to-cyan-500 ${onClick ? 'cursor-pointer' : ''}`}
+    <Avatar
+      className={cn(
+        sizeClasses[size],
+        onClick && 'cursor-pointer hover:ring-2 hover:ring-accent transition-all',
+        className
+      )}
       onClick={onClick}
-      title={onClick ? 'Click to set profile picture' : agent.name}
+      title={onClick ? 'Click to change profile picture' : agent.name}
     >
-      <span className="text-white font-bold">{agent.name[0]?.toUpperCase()}</span>
-    </div>
+      {profilePicUrl && !imageError ? (
+        <AvatarImage
+          src={profilePicUrl}
+          alt={agent.name}
+          onError={() => setImageError(true)}
+        />
+      ) : null}
+      <AvatarFallback className="bg-accent text-accent-foreground font-semibold">
+        {agent.name[0]?.toUpperCase()}
+      </AvatarFallback>
+    </Avatar>
   );
 };

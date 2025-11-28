@@ -173,7 +173,7 @@ class TestGetDebugConfig:
             monkeypatch.setenv("DEBUG_AGENTS", "true")
 
             # Patch the DEBUG_CONFIG path
-            with patch("config.config_loader.DEBUG_CONFIG", tmp_path):
+            with patch("config.loaders.DEBUG_CONFIG", tmp_path):
                 config = get_debug_config()
                 assert config["debug"]["enabled"] is True
         finally:
@@ -189,7 +189,7 @@ class TestGetDebugConfig:
         try:
             monkeypatch.setenv("DEBUG_AGENTS", "false")
 
-            with patch("config.config_loader.DEBUG_CONFIG", tmp_path):
+            with patch("config.loaders.DEBUG_CONFIG", tmp_path):
                 config = get_debug_config()
                 assert config["debug"]["enabled"] is False
         finally:
@@ -206,7 +206,7 @@ class TestGetDebugConfig:
             # Make sure env var is not set
             monkeypatch.delenv("DEBUG_AGENTS", raising=False)
 
-            with patch("config.config_loader.DEBUG_CONFIG", tmp_path):
+            with patch("config.loaders.DEBUG_CONFIG", tmp_path):
                 config = get_debug_config()
                 assert config["debug"]["enabled"] is True
         finally:
@@ -228,7 +228,7 @@ class TestGetToolDescription:
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.TOOLS_CONFIG", tmp_path):
+            with patch("config.loaders.TOOLS_CONFIG", tmp_path):
                 desc = get_tool_description("test_tool", agent_name="Alice")
                 assert desc == "Test Alice"
         finally:
@@ -242,7 +242,7 @@ class TestGetToolDescription:
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.TOOLS_CONFIG", tmp_path):
+            with patch("config.loaders.TOOLS_CONFIG", tmp_path):
                 desc = get_tool_description("test_tool")
                 assert desc is None
         finally:
@@ -256,7 +256,7 @@ class TestGetToolDescription:
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.TOOLS_CONFIG", tmp_path):
+            with patch("config.loaders.TOOLS_CONFIG", tmp_path):
                 desc = get_tool_description("nonexistent_tool")
                 assert desc is None
         finally:
@@ -270,7 +270,7 @@ class TestGetToolDescription:
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.TOOLS_CONFIG", tmp_path):
+            with patch("config.loaders.TOOLS_CONFIG", tmp_path):
                 desc = get_tool_description("test_tool", agent_name="Alice", config_sections="memory, background")
                 assert desc == "Alice - memory, background"
         finally:
@@ -291,8 +291,8 @@ class TestGetToolDescription:
 
         try:
             with (
-                patch("config.config_loader.TOOLS_CONFIG", tools_path),
-                patch("config.config_loader.GUIDELINES_CONFIG", guidelines_path),
+                patch("config.loaders.TOOLS_CONFIG", tools_path),
+                patch("config.loaders.GUIDELINES_CONFIG", guidelines_path),
             ):
                 desc = get_tool_description("guidelines", agent_name="Alice")
                 assert desc == "Guidelines for Alice"
@@ -321,7 +321,7 @@ memory_brain_prompt: |
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.GUIDELINES_CONFIG", tmp_path):
+            with patch("config.loaders.GUIDELINES_CONFIG", tmp_path):
                 prompt = get_memory_brain_prompt(agent_name="TestAgent", max_memories=3, policy_section="Test policy")
                 assert "TestAgent" in prompt
                 assert "3" in prompt
@@ -341,7 +341,7 @@ memory_brain_prompt: |
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.GUIDELINES_CONFIG", tmp_path):
+            with patch("config.loaders.GUIDELINES_CONFIG", tmp_path):
                 prompt = get_memory_brain_prompt(agent_name="TestAgent", max_memories=3, policy_section="Test")
                 assert prompt == ""
         finally:
@@ -360,7 +360,7 @@ memory_brain_prompt: |
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.GUIDELINES_CONFIG", tmp_path):
+            with patch("config.loaders.GUIDELINES_CONFIG", tmp_path):
                 prompt = get_memory_brain_prompt(agent_name="", max_memories=0, policy_section="")
                 # Should still work with empty values
                 assert "Agent: " in prompt
@@ -381,7 +381,7 @@ memory_brain_prompt: |
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.GUIDELINES_CONFIG", tmp_path):
+            with patch("config.loaders.GUIDELINES_CONFIG", tmp_path):
                 prompt = get_memory_brain_prompt(agent_name="Dr. O'Brien (PhD)", max_memories=3, policy_section="Test")
                 assert "Dr. O'Brien (PhD)" in prompt
         finally:
@@ -400,7 +400,7 @@ memory_brain_prompt: |
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.GUIDELINES_CONFIG", tmp_path):
+            with patch("config.loaders.GUIDELINES_CONFIG", tmp_path):
                 prompt = get_memory_brain_prompt(agent_name="프리렌", max_memories=3, policy_section="균형 잡힌 정책")
                 assert "프리렌" in prompt
                 assert "균형 잡힌 정책" in prompt
@@ -423,7 +423,7 @@ memory_brain_prompt: |
             tmp_path = Path(tmp.name)
 
         try:
-            with patch("config.config_loader.GUIDELINES_CONFIG", tmp_path):
+            with patch("config.loaders.GUIDELINES_CONFIG", tmp_path):
                 multiline_policy = "Line 1\nLine 2\nLine 3"
 
                 prompt = get_memory_brain_prompt(

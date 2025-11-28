@@ -8,6 +8,9 @@ import { MessageInput } from './chat-room/MessageInput';
 import { api } from '../utils/api';
 import type { Room, ParticipantType } from '../types';
 import { useToast } from '../contexts/ToastContext';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { MessageSquare, X, AlertTriangle } from 'lucide-react';
 
 interface ChatRoomProps {
   roomId: number | null;
@@ -170,23 +173,21 @@ export const ChatRoom = ({ roomId, onRoomRead, onMarkRoomAsRead, onRenameRoom }:
 
   if (!roomId) {
     return (
-      <div className="flex-1 flex items-center justify-center p-4">
+      <div className="flex-1 flex items-center justify-center p-4 bg-background">
         <div className="text-center max-w-md">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-4 sm:mb-6 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-full flex items-center justify-center shadow-lg">
-            <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
+          <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-4 sm:mb-6 bg-accent rounded-full flex items-center justify-center shadow-lg">
+            <MessageSquare className="w-10 h-10 sm:w-12 sm:h-12 text-accent-foreground" />
           </div>
-          <h3 className="text-xl sm:text-2xl font-bold text-slate-700 mb-3 sm:mb-4">Welcome to Claude Code RP</h3>
-          <p className="text-slate-500 mb-2 text-sm sm:text-base">Select a chatroom or agent from the sidebar</p>
-          <p className="text-slate-400 text-xs sm:text-sm">Click an agent to start a direct chat, or create a new chatroom for multiple agents</p>
+          <h3 className="text-xl sm:text-2xl font-bold text-foreground mb-3 sm:mb-4">Welcome to Claude Code RP</h3>
+          <p className="text-muted-foreground mb-2 text-sm sm:text-base">Select a chatroom or agent from the sidebar</p>
+          <p className="text-muted-foreground/70 text-xs sm:text-sm">Click an agent to start a direct chat, or create a new chatroom for multiple agents</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex bg-white relative">
+    <div className="flex-1 flex bg-background relative">
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
@@ -219,24 +220,24 @@ export const ChatRoom = ({ roomId, onRoomRead, onMarkRoomAsRead, onRenameRoom }:
       {/* Right Sidebar - Agent Manager (Desktop: collapsible, Mobile/Tablet: modal) */}
       <div
         ref={agentManagerRef}
-        className={`
-          ${isAgentManagerCollapsed ? 'xl:w-0 xl:border-0' : 'xl:w-96 xl:border-l xl:border-slate-200'}
-          xl:bg-slate-50 xl:overflow-y-auto xl:static xl:block
-          fixed inset-y-0 right-0 z-30 w-80 sm:w-96 bg-slate-50 border-l border-slate-200 overflow-y-auto
-          transform transition-all duration-300 ease-in-out
-          ${showAgentManager ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'}
-        `}
+        className={cn(
+          isAgentManagerCollapsed ? 'xl:w-0 xl:border-0' : 'xl:w-96 xl:border-l xl:border-border',
+          'xl:bg-secondary xl:overflow-y-auto xl:static xl:block',
+          'fixed inset-y-0 right-0 z-30 w-80 sm:w-96 bg-secondary border-l border-border overflow-y-auto',
+          'transform transition-all duration-300 ease-in-out',
+          showAgentManager ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'
+        )}
       >
-        <div className="xl:hidden flex justify-between items-center p-4 border-b border-slate-200 bg-white sticky top-0 z-10">
-          <h3 className="font-bold text-lg text-slate-800">Room Agents</h3>
-          <button
+        <div className="xl:hidden flex justify-between items-center p-4 border-b border-border bg-card sticky top-0 z-10">
+          <h3 className="font-bold text-lg text-foreground">Room Agents</h3>
+          <Button
             onClick={() => setShowAgentManager(false)}
-            className="p-2 hover:bg-slate-100 active:bg-slate-200 rounded-lg transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11"
           >
-            <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+            <X className="w-5 h-5" />
+          </Button>
         </div>
         <AgentManager roomId={roomId} />
       </div>
@@ -247,7 +248,7 @@ export const ChatRoom = ({ roomId, onRoomRead, onMarkRoomAsRead, onRenameRoom }:
           role="button"
           tabIndex={0}
           aria-label="Close agent manager"
-          className="xl:hidden fixed inset-0 bg-black bg-opacity-50 z-20 transition-opacity duration-300 ease-in-out"
+          className="xl:hidden fixed inset-0 bg-black/60 z-20 transition-opacity duration-300 ease-in-out"
           onClick={() => setShowAgentManager(false)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -260,43 +261,41 @@ export const ChatRoom = ({ roomId, onRoomRead, onMarkRoomAsRead, onRenameRoom }:
 
       {/* Clear Messages Confirmation Modal */}
       {showClearConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-xl shadow-2xl max-w-md w-full p-6 border border-border">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-                <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+              <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-6 h-6 text-destructive" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-800">Clear Conversation History?</h3>
-                <p className="text-sm text-slate-500">This action cannot be undone</p>
+                <h3 className="text-lg font-bold text-foreground">Clear Conversation History?</h3>
+                <p className="text-sm text-muted-foreground">This action cannot be undone</p>
               </div>
             </div>
-            <p className="text-slate-600 mb-6">
+            <p className="text-muted-foreground mb-6">
               Are you sure you want to delete all messages in this room? This will permanently remove the entire conversation history.
             </p>
             {clearError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-700">{clearError}</p>
+              <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                <p className="text-sm text-destructive">{clearError}</p>
               </div>
             )}
             <div className="flex gap-3 justify-end">
-              <button
+              <Button
                 onClick={() => {
                   setShowClearConfirm(false);
                   setClearError(null);
                 }}
-                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 active:bg-slate-400 font-medium transition-colors"
+                variant="outline"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleClearMessages}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 active:bg-red-800 font-medium transition-colors"
+                variant="destructive"
               >
                 Clear Messages
-              </button>
+              </Button>
             </div>
           </div>
         </div>

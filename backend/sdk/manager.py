@@ -129,7 +129,7 @@ class AgentManager:
         }
 
         options = ClaudeAgentOptions(
-            model="claude-opus-4-5-20250114"
+            model="claude-opus-4-5-20251101"
             if not USE_HAIKU
             else "claude-haiku-4-5-20251001",
             system_prompt=final_system_prompt,

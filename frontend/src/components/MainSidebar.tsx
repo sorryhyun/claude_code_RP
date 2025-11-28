@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Hash, Users, Plus, X, Search, LogOut } from 'lucide-react';
 import type { Agent, AgentCreate, RoomSummary, Room } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useFetchAgentConfigs } from '../hooks/useFetchAgentConfigs';
@@ -6,16 +7,19 @@ import { CreateRoomForm } from './sidebar/CreateRoomForm';
 import { RoomListPanel } from './sidebar/RoomListPanel';
 import { CreateAgentForm } from './sidebar/CreateAgentForm';
 import { AgentListPanel } from './sidebar/AgentListPanel';
+import { ThemeToggle } from './ThemeToggle';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
 interface MainSidebarProps {
-  // Rooms
   rooms: RoomSummary[];
   selectedRoomId: number | null;
   onSelectRoom: (roomId: number) => void;
   onCreateRoom: (name: string) => Promise<Room>;
   onDeleteRoom: (roomId: number) => Promise<void>;
-
-  // Agents
   agents: Agent[];
   selectedAgentId: number | null;
   onSelectAgent: (agentId: number) => void;
@@ -51,7 +55,6 @@ export const MainSidebar = ({
     setShowAgentForm(!showAgentForm);
   };
 
-  // Filter and sort agents
   const filteredAndSortedAgents = agents
     .filter(agent =>
       agent.name.toLowerCase().includes(agentSearchQuery.toLowerCase())
@@ -61,34 +64,38 @@ export const MainSidebar = ({
     );
 
   return (
-    <div className="w-80 sm:w-80 bg-white shadow-xl flex flex-col border-r border-slate-200 h-full">
+    <div className="w-80 bg-sidebar-background flex flex-col border-r border-sidebar-border h-full">
       {/* Header */}
-      <div className="pl-20 pr-4 py-4 sm:p-6 border-b border-slate-200 bg-gradient-to-r from-indigo-600 to-purple-600">
-        <h2 className="text-xl sm:text-2xl font-bold text-white mb-1">Claude Code RP</h2>
-        <p className="text-indigo-100 text-xs sm:text-sm">Multi-agent role play</p>
+      <div className="pl-16 pr-4 py-4 sm:p-5 border-b border-sidebar-border">
+        <h2 className="text-lg sm:text-xl font-bold text-sidebar-foreground">Claude Code RP</h2>
+        <p className="text-sidebar-foreground/60 text-xs">Multi-agent role play</p>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-200">
+      <div className="flex border-b border-sidebar-border">
         <button
           onClick={() => setActiveTab('rooms')}
-          className={`flex-1 px-3 sm:px-4 py-2.5 sm:py-3 font-medium text-xs sm:text-sm transition-all ${
+          className={cn(
+            'flex-1 px-3 py-2.5 font-medium text-sm transition-all flex items-center justify-center gap-2',
             activeTab === 'rooms'
-              ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50'
-              : 'text-slate-600 hover:bg-slate-50'
-          }`}
+              ? 'text-sidebar-primary border-b-2 border-sidebar-primary bg-sidebar-accent'
+              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+          )}
         >
+          <Hash className="w-4 h-4" />
           Chatrooms
         </button>
         <button
           onClick={() => setActiveTab('agents')}
-          className={`flex-1 px-3 sm:px-4 py-2.5 sm:py-3 font-medium text-xs sm:text-sm transition-all ${
+          className={cn(
+            'flex-1 px-3 py-2.5 font-medium text-sm transition-all flex items-center justify-center gap-2',
             activeTab === 'agents'
-              ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50'
-              : 'text-slate-600 hover:bg-slate-50'
-          }`}
+              ? 'text-accent border-b-2 border-accent bg-accent/10'
+              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+          )}
         >
-          Agent List
+          <Users className="w-4 h-4" />
+          Agents
         </button>
       </div>
 
@@ -96,14 +103,15 @@ export const MainSidebar = ({
       {activeTab === 'rooms' && (
         <>
           {/* New Room Button (Desktop only) */}
-          <div className="hidden lg:block p-3 sm:p-4 border-b border-slate-200">
-            <button
+          <div className="hidden lg:block p-3 border-b border-sidebar-border">
+            <Button
               onClick={() => setShowRoomForm(!showRoomForm)}
-              className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-lg font-medium transition-colors shadow-sm hover:shadow-md flex items-center justify-center gap-2 text-sm sm:text-base touch-manipulation min-h-[44px]"
+              variant={showRoomForm ? 'secondary' : 'default'}
+              className="w-full gap-2"
             >
-              <span className="text-xl">+</span>
+              {showRoomForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               {showRoomForm ? 'Cancel' : 'New Chatroom'}
-            </button>
+            </Button>
           </div>
 
           {/* Create Room Form */}
@@ -116,29 +124,23 @@ export const MainSidebar = ({
 
           {/* Rooms List with FAB Container */}
           <div className="relative flex-1 min-h-0">
-            <RoomListPanel
-              rooms={rooms}
-              selectedRoomId={selectedRoomId}
-              onSelectRoom={onSelectRoom}
-              onDeleteRoom={onDeleteRoom}
-            />
+            <ScrollArea className="h-full">
+              <RoomListPanel
+                rooms={rooms}
+                selectedRoomId={selectedRoomId}
+                onSelectRoom={onSelectRoom}
+                onDeleteRoom={onDeleteRoom}
+              />
+            </ScrollArea>
 
             {/* Floating Action Button (Mobile only) */}
-            <button
+            <Button
               onClick={() => setShowRoomForm(!showRoomForm)}
-              className="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-indigo-700 active:scale-95 transition-transform z-30"
-              title={showRoomForm ? 'Cancel' : 'New Chatroom'}
+              size="icon"
+              className="lg:hidden fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-lg z-30"
             >
-              {showRoomForm ? (
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              ) : (
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              )}
-            </button>
+              {showRoomForm ? <X className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
+            </Button>
           </div>
         </>
       )}
@@ -147,14 +149,15 @@ export const MainSidebar = ({
       {activeTab === 'agents' && (
         <>
           {/* New Agent Button (Desktop only) */}
-          <div className="hidden lg:block p-3 sm:p-4 border-b border-slate-200">
-            <button
+          <div className="hidden lg:block p-3 border-b border-sidebar-border">
+            <Button
               onClick={handleShowAgentForm}
-              className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg font-medium transition-colors shadow-sm hover:shadow-md flex items-center justify-center gap-2 text-sm sm:text-base touch-manipulation min-h-[44px]"
+              variant={showAgentForm ? 'secondary' : 'default'}
+              className={cn('w-full gap-2', !showAgentForm && 'bg-accent hover:bg-accent/90')}
             >
-              <span className="text-xl">+</span>
+              {showAgentForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               {showAgentForm ? 'Cancel' : 'New Agent'}
-            </button>
+            </Button>
           </div>
 
           {/* Create Agent Form */}
@@ -167,37 +170,22 @@ export const MainSidebar = ({
           )}
 
           {/* Search Agents */}
-          <div className="p-3 sm:p-4 border-b border-slate-200">
+          <div className="p-3 border-b border-sidebar-border">
             <div className="relative">
-              <input
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
                 type="text"
                 value={agentSearchQuery}
                 onChange={(e) => setAgentSearchQuery(e.target.value)}
                 placeholder="Search agents..."
-                className="w-full px-3 sm:px-4 py-2 sm:py-2.5 pl-10 sm:pl-11 bg-slate-50 border border-slate-200 rounded-lg text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
+                className="pl-9 pr-9 bg-sidebar-accent border-sidebar-border"
               />
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-slate-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
               {agentSearchQuery && (
                 <button
                   onClick={() => setAgentSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                  title="Clear search"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <X className="w-4 h-4" />
                 </button>
               )}
             </div>
@@ -205,49 +193,54 @@ export const MainSidebar = ({
 
           {/* Agents List with FAB Container */}
           <div className="relative flex-1 min-h-0">
-            <AgentListPanel
-              agents={filteredAndSortedAgents}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={onSelectAgent}
-              onDeleteAgent={onDeleteAgent}
-              onViewProfile={onViewProfile}
-            />
+            <ScrollArea className="h-full">
+              <AgentListPanel
+                agents={filteredAndSortedAgents}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={onSelectAgent}
+                onDeleteAgent={onDeleteAgent}
+                onViewProfile={onViewProfile}
+              />
+            </ScrollArea>
 
             {/* Floating Action Button (Mobile only) */}
-            <button
+            <Button
               onClick={handleShowAgentForm}
-              className="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-emerald-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-emerald-700 active:scale-95 transition-transform z-30"
-              title={showAgentForm ? 'Cancel' : 'New Agent'}
-            >
-              {showAgentForm ? (
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              ) : (
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
+              size="icon"
+              className={cn(
+                'lg:hidden fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-lg z-30',
+                !showAgentForm && 'bg-accent hover:bg-accent/90'
               )}
-            </button>
+            >
+              {showAgentForm ? <X className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
+            </Button>
           </div>
         </>
       )}
 
-      {/* Logout Button */}
-      <div className="mt-auto p-3 sm:p-4 border-t border-slate-200">
-        <button
+      {/* Footer */}
+      <div className="mt-auto border-t border-sidebar-border p-3 space-y-3">
+        {/* Theme Toggle */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Theme</span>
+          <ThemeToggle />
+        </div>
+
+        <Separator className="bg-sidebar-border" />
+
+        {/* Logout Button */}
+        <Button
           onClick={() => {
             if (confirm('Are you sure you want to logout?')) {
               logout();
             }
           }}
-          className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 rounded-lg font-medium transition-colors text-sm sm:text-base touch-manipulation min-h-[44px] flex items-center justify-center gap-2"
+          variant="ghost"
+          className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-          </svg>
+          <LogOut className="w-4 h-4" />
           Logout
-        </button>
+        </Button>
       </div>
     </div>
   );

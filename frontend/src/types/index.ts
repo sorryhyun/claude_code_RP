@@ -96,6 +96,7 @@ export interface RoomCreate {
 }
 
 export interface RoomUpdate {
+  name?: string;
   max_interactions?: number | null;
   is_paused?: boolean;
 }

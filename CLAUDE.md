@@ -36,9 +36,10 @@ uv run pytest --cov=backend --cov-report=term-missing
 ### Backend
 - **FastAPI** application with REST API and polling endpoints
 - **Multi-agent orchestration** with Claude SDK integration
-- **SQLite** database with async SQLAlchemy
+- **SQLite** database with async SQLAlchemy and write queue serialization
 - **Background scheduler** for autonomous agent conversations
 - **In-memory caching** for performance optimization
+- **Modular configuration** with hot-reloading and startup validation
 - **Domain layer** with Pydantic models for type-safe business logic
 - **Key features:**
   - Agents are independent entities that persist across rooms
@@ -48,6 +49,8 @@ uv run pytest --cov=backend --cov-report=term-missing
   - Agents continue conversations in background when user is not in room
   - Cached database queries and filesystem reads (70-90% performance improvement)
   - Modular tool architecture (action_tools, guidelines_tools, brain_tools)
+  - Write queue for SQLite contention elimination
+  - Comprehensive config validation with startup diagnostics
 
 **For detailed backend documentation**, see [backend/README.md](backend/README.md) which includes:
 - Complete API reference
@@ -139,6 +142,17 @@ Claude Code Role Play supports **two mutually exclusive memory modes** controlle
 - File locking prevents concurrent write conflicts
 - See `backend/utils/file_locking.py` for implementation
 
+**Modular Config System (`backend/config/`):**
+```
+config/
+├── config_loader.py    # Facade - backward-compatible imports
+├── cache.py            # YAML caching with mtime invalidation
+├── loaders.py          # File loaders (get_tools_config, etc.)
+├── tools.py            # Tool descriptions and schemas
+├── memory.py           # Memory brain configuration
+└── validation.py       # Schema validation, startup logging
+```
+
 ### Tool Configuration (YAML-Based)
 
 Tool descriptions and debug settings are configured via YAML files in `backend/config/tools/`:
@@ -155,6 +169,11 @@ Tool descriptions and debug settings are configured via YAML files in `backend/c
 - Currently uses `v3` (enhanced guidelines with explicit scene handling)
 - Guidelines are injected via tool descriptions
 - Supports situation builder notes
+
+**`brain_config.yaml`** - Memory brain configuration
+- Memory policies (`balanced`, `trauma_biased`, `genius_planner`, `optimistic`, `avoidant`)
+- Memory selection tool definitions
+- Default settings (max_memories, cooldown)
 
 **`debug.yaml`** - Debug logging configuration
 - Control what gets logged (system prompt, tools, messages, responses)

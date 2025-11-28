@@ -47,15 +47,25 @@ backend/
 ├── auth.py                        # JWT authentication
 ├── dependencies.py                # Dependency injection
 ├── background_scheduler.py        # APScheduler for autonomous chats
-├── config/                        # Configuration system
-│   ├── config_loader.py          # YAML hot-reloading with file locking
+├── config/                        # Configuration system (modular)
+│   ├── config_loader.py          # Facade - re-exports from submodules
+│   ├── cache.py                  # YAML caching with mtime invalidation
+│   ├── loaders.py                # Config file loaders
+│   ├── tools.py                  # Tool descriptions, schemas, grouping
+│   ├── memory.py                 # Memory brain prompts, policies
+│   ├── validation.py             # Schema validation, startup logging
 │   ├── parser.py                 # Agent config parser
 │   └── tools/                    # YAML configuration files
 │       ├── tools.yaml            # Tool definitions
 │       ├── guidelines_3rd.yaml   # System prompt template
+│       ├── brain_config.yaml     # Memory brain configuration
 │       └── debug.yaml            # Debug logging config
+├── core/                          # Core application setup
+│   ├── app_factory.py            # FastAPI app creation with lifespan
+│   ├── settings.py               # Application settings
+│   └── logging.py                # Logging configuration
 ├── domain/                        # Domain models
-│   ├── task_identifier.py        # TaskIdentifier dataclass (Phase 5)
+│   ├── task_identifier.py        # TaskIdentifier dataclass
 │   ├── agent_config.py           # AgentConfigData
 │   ├── memory.py                 # Memory types and policies
 │   └── contexts.py               # Context dataclasses
@@ -72,7 +82,7 @@ backend/
 │   ├── agent_management.py       # Agent CRUD
 │   ├── room_agents.py            # Room-agent associations
 │   └── messages.py               # Messaging and polling
-├── sdk/                           # Claude SDK integration (Phase 5 refactored)
+├── sdk/                           # Claude SDK integration
 │   ├── manager.py                # AgentManager (orchestration)
 │   ├── client_pool.py            # ClientPool (lifecycle management)
 │   ├── stream_parser.py          # StreamParser (message parsing)
@@ -83,6 +93,7 @@ backend/
 │   ├── agent_service.py          # Agent business logic
 │   └── agent_config_service.py   # Config file I/O
 ├── utils/                         # Utilities
+│   ├── write_queue.py            # Single-writer pattern for SQLite
 │   ├── migrations.py             # Automatic schema migrations
 │   ├── file_locking.py           # Cross-platform file locking
 │   ├── memory_parser.py          # Long-term memory parser
@@ -109,6 +120,12 @@ backend/
 
 **Database:** SQLite with aiosqlite, async sessions, WAL mode, NullPool, 30s timeout
 
+**Write Queue (`utils/write_queue.py`):**
+- Single-writer pattern eliminates SQLite write contention
+- Background task serializes all DB writes
+- Graceful shutdown with pending operation draining
+- Fallback to direct execution if queue not initialized
+
 **Automatic Migrations:** Schema changes handled automatically via `utils/migrations.py`. No manual database deletion needed.
 
 **Models:**
@@ -127,10 +144,30 @@ backend/
 
 **Filesystem-Primary:** All configurations loaded from filesystem with hot-reloading. Changes apply immediately.
 
+**Modular Architecture:**
+```
+config/
+├── config_loader.py    # Facade - backward-compatible re-exports
+├── cache.py            # Caching with mtime-based invalidation
+├── loaders.py          # Raw file loaders (get_tools_config, etc.)
+├── tools.py            # Tool descriptions, schemas, grouping
+├── memory.py           # Memory brain prompts and policies
+├── validation.py       # Schema validation, startup diagnostics
+└── tools/              # YAML configuration files
+```
+
 **YAML Configuration Files (`config/tools/`):**
 - `tools.yaml`: Tool definitions (skip, memorize, recall, guidelines, configuration)
 - `guidelines_3rd.yaml`: System prompt template with `{agent_name}` placeholders
+- `brain_config.yaml`: Memory brain policies and defaults
 - `debug.yaml`: Debug logging configuration
+
+**Startup Validation:** On app startup, validates all config files and logs:
+- Active guidelines version
+- Active system prompt
+- Memory mode (RECALL or BRAIN)
+- Enabled tools count
+- Debug logging status
 
 **Agent Configuration:**
 
@@ -167,7 +204,7 @@ AgentManager (445 lines) - Orchestrates responses and interruption
 - **Client Management:** Uses ClientPool with `TaskIdentifier(room_id, agent_id)` keys
 - **Interruption Support:** `interrupt_all()`, `interrupt_room()`, `interrupt_agent()`
 - **Response Generation:** `generate_sdk_response()` yields stream events
-- Model: `claude-opus-4-5-20250114`, 32K thinking tokens
+- Model: `claude-opus-4-5-20251101`, 32K thinking tokens
 
 **ClientPool (`sdk/client_pool.py`):**
 - **SDK Best Practices:** Reuse clients within sessions, connection locking, exponential backoff retry

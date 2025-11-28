@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { Room } from '../../types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface CreateRoomFormProps {
   onCreateRoom: (name: string) => Promise<Room>;
@@ -25,9 +27,9 @@ export const CreateRoomForm = ({ onCreateRoom, onClose }: CreateRoomFormProps) =
   };
 
   return (
-    <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50">
+    <div className="p-3 border-b border-sidebar-border bg-sidebar-accent/50">
       <form onSubmit={handleSubmit} className="space-y-3">
-        <input
+        <Input
           type="text"
           value={newRoomName}
           onChange={(e) => {
@@ -35,20 +37,17 @@ export const CreateRoomForm = ({ onCreateRoom, onClose }: CreateRoomFormProps) =
             setRoomError(null);
           }}
           placeholder="Enter room name..."
-          className="w-full px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent min-h-[44px]"
+          className="bg-sidebar-background border-sidebar-border"
           autoFocus
         />
         {roomError && (
-          <div className="text-red-600 text-xs sm:text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
             {roomError}
           </div>
         )}
-        <button
-          type="submit"
-          className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg font-medium transition-colors text-sm sm:text-base min-h-[44px]"
-        >
+        <Button type="submit" className="w-full bg-accent hover:bg-accent/90">
           Create Room
-        </button>
+        </Button>
       </form>
     </div>
   );

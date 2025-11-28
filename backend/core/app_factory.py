@@ -13,6 +13,7 @@ from database import get_db, init_db
 from fastapi import FastAPI
 from orchestration import ChatOrchestrator
 from sdk import AgentManager
+from utils.write_queue import start_writer, stop_writer
 
 from core import get_logger, get_settings
 
@@ -46,6 +47,9 @@ def create_app() -> FastAPI:
         from config.config_loader import log_config_validation
 
         log_config_validation()
+
+        # Start write queue for serialized DB writes
+        await start_writer()
 
         # Initialize database
         await init_db()
@@ -89,6 +93,7 @@ def create_app() -> FastAPI:
         logger.info("🛑 Application shutdown...")
         background_scheduler.stop()
         await agent_manager.shutdown()
+        await stop_writer()
         logger.info("✅ Application shutdown complete")
 
     # Initialize rate limiter
