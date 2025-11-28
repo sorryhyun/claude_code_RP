@@ -1,6 +1,8 @@
 name: Build Windows installer
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       installer_version:
@@ -25,7 +27,16 @@ jobs:
       - name: Build one-click installer executable
         shell: pwsh
         run: |
-          $version = if ([string]::IsNullOrWhiteSpace('${{ github.event.inputs.installer_version }}')) { '0.0.0' } else { '${{ github.event.inputs.installer_version }}' }
+          # Use release tag if triggered by release, otherwise use manual input or default
+          $releaseTag = '${{ github.event.release.tag_name }}'
+          $manualVersion = '${{ github.event.inputs.installer_version }}'
+          if (-not [string]::IsNullOrWhiteSpace($releaseTag)) {
+            $version = $releaseTag -replace '^v', ''
+          } elseif (-not [string]::IsNullOrWhiteSpace($manualVersion)) {
+            $version = $manualVersion
+          } else {
+            $version = '0.0.0'
+          }
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           $output = "dist/ClaudeCodeSetup.exe"
           Write-Host "Building installer at $output with version $version"
@@ -42,3 +53,9 @@ jobs:
           name: ClaudeCodeSetup
           path: dist/ClaudeCodeSetup.exe
           if-no-files-found: error
+
+      - name: Upload to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ClaudeCodeSetup.exe
