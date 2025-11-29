@@ -6,6 +6,7 @@ import crud
 import schemas
 from auth import require_admin
 from config import list_available_configs
+from core.paths import get_agents_dir
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -92,10 +93,8 @@ async def get_agent_profile_pic(agent_name: str):
     # Validate agent name to prevent path traversal
     _validate_agent_name(agent_name)
 
-    # Get the project root directory (parent of backend/)
-    backend_dir = Path(__file__).parent.parent
-    project_root = backend_dir.parent
-    agents_dir = project_root / "agents"
+    # Get the agents directory (handles both dev and frozen exe modes)
+    agents_dir = get_agents_dir()
 
     # Common image extensions
     image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]

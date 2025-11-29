@@ -9,6 +9,8 @@
 *.sqlite3
 test_*.txt
 .python-version
+dist/
+build/
 
 # Node
 frontend/node_modules/

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File scripts/windows/build_exe.ps1 -SkipFrontend)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

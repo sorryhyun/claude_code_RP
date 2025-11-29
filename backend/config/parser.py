@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from core import get_settings
+from core.paths import get_agents_dir, get_work_dir
 from domain.agent_config import AgentConfigData
 from domain.memory import MemoryPolicy
 from utils.memory_parser import parse_long_term_memory
@@ -54,9 +55,7 @@ def parse_agent_config(file_path: str) -> Optional[AgentConfigData]:
     # Resolve path relative to project root if not absolute
     path = Path(file_path)
     if not path.is_absolute():
-        backend_dir = Path(__file__).parent.parent
-        project_root = backend_dir.parent
-        path = project_root / file_path
+        path = get_work_dir() / file_path
 
     if not path.exists() or not path.is_dir():
         return None
@@ -185,10 +184,9 @@ def list_available_configs() -> Dict[str, Dict[str, Optional[str]]]:
         - "path": str (relative path to agent folder)
         - "group": Optional[str] (group name if in a group folder, None otherwise)
     """
-    # Get the project root directory (parent of backend/)
-    backend_dir = Path(__file__).parent.parent
-    project_root = backend_dir.parent
-    agents_dir = project_root / "agents"
+    # Get paths (handles both dev and frozen exe modes)
+    work_dir = get_work_dir()
+    agents_dir = get_agents_dir()
 
     if not agents_dir.exists():
         return {}
@@ -212,13 +210,13 @@ def list_available_configs() -> Dict[str, Dict[str, Optional[str]]]:
                     # Verify it has at least one required config file
                     if any((agent_item / f).exists() for f in required_files):
                         agent_name = agent_item.name
-                        relative_path = agent_item.relative_to(project_root)
+                        relative_path = agent_item.relative_to(work_dir)
                         configs[agent_name] = {"path": str(relative_path), "group": group_name}
         else:
             # Regular agent folder (not in a group)
             if any((item / f).exists() for f in required_files):
                 agent_name = item.name
-                relative_path = item.relative_to(project_root)
+                relative_path = item.relative_to(work_dir)
                 configs[agent_name] = {"path": str(relative_path), "group": None}
 
     return configs

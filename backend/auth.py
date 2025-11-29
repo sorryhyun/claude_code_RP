@@ -259,12 +259,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
     ]
 
     async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
         # Skip auth for excluded paths
-        if request.url.path in self.EXCLUDED_PATHS:
+        if path in self.EXCLUDED_PATHS:
+            return await call_next(request)
+
+        # Skip auth for static assets (bundled frontend)
+        if path.startswith("/assets/") or path.endswith((".js", ".css", ".svg", ".png", ".ico", ".woff", ".woff2")):
             return await call_next(request)
 
         # Skip auth for profile picture requests (needed for <img> tags)
-        if request.url.path.startswith("/agents/") and request.url.path.endswith("/profile-pic"):
+        if path.startswith("/agents/") and path.endswith("/profile-pic"):
             return await call_next(request)
 
         # Skip auth for OPTIONS requests (CORS preflight)

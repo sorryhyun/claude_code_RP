@@ -7,6 +7,7 @@ database upgrades without requiring manual deletion of the database file.
 
 import logging
 
+from core.paths import get_agents_dir
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -142,8 +143,6 @@ async def _add_anti_pattern_field(conn):
 
 async def _refresh_profile_pics(conn):
     """Refresh profile_pic data from filesystem for all agents."""
-    from pathlib import Path
-
     logger.info("  Refreshing profile_pic data from filesystem...")
 
     # Get all agents
@@ -155,9 +154,7 @@ async def _refresh_profile_pics(conn):
         return
 
     updated_count = 0
-    backend_dir = Path(__file__).parent
-    project_root = backend_dir.parent
-    agents_dir = project_root / "agents"
+    agents_dir = get_agents_dir()
 
     # Common image extensions
     image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]

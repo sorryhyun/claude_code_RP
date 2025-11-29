@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from core.paths import get_work_dir
 from utils.file_locking import file_lock
 
 if TYPE_CHECKING:
@@ -26,9 +27,8 @@ class AgentConfigService:
 
     @staticmethod
     def get_project_root() -> Path:
-        """Get the project root directory (parent of backend/)."""
-        backend_dir = Path(__file__).parent.parent
-        return backend_dir.parent
+        """Get the project root directory (handles both dev and frozen exe modes)."""
+        return get_work_dir()
 
     @staticmethod
     def append_to_recent_events(config_file: str, memory_entry: str, timestamp: Optional[datetime] = None) -> bool:

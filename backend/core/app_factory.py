@@ -5,17 +5,39 @@ This module provides functions for creating and configuring the FastAPI applicat
 with all necessary middleware, routers, and dependencies.
 """
 
+import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import crud
 from background_scheduler import BackgroundScheduler
 from database import get_db, init_db
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from orchestration import ChatOrchestrator
 from sdk import AgentManager
+from starlette.responses import FileResponse
 from utils.write_queue import start_writer, stop_writer
 
 from core import get_logger, get_settings
+
+
+def get_static_dir() -> Path | None:
+    """Get the path to the built frontend static files."""
+    # When running as PyInstaller bundle, static files are in _MEIPASS
+    if getattr(sys, "frozen", False):
+        base_path = Path(sys._MEIPASS)
+        static_dir = base_path / "static"
+        if static_dir.exists():
+            return static_dir
+
+    # Development: check for frontend/dist
+    dev_static = Path(__file__).parent.parent.parent / "frontend" / "dist"
+    if dev_static.exists():
+        return dev_static
+
+    return None
 
 logger = get_logger("AppFactory")
 
@@ -134,5 +156,27 @@ def create_app() -> FastAPI:
 
     # Add health check to root
     app.include_router(auth.router, tags=["Health"])
+
+    # Mount static files for bundled frontend (production/packaged mode)
+    static_dir = get_static_dir()
+    if static_dir:
+        logger.info(f"📦 Serving static frontend from: {static_dir}")
+
+        # Serve static assets (js, css, images)
+        assets_dir = static_dir / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        # Catch-all route for SPA - serve index.html for non-API routes
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str):
+            """Serve the SPA for all non-API routes."""
+            # Don't serve SPA for API routes (they're already handled by routers)
+            if full_path.startswith(("auth", "rooms", "agents", "debug")):
+                return None
+            index_file = static_dir / "index.html"
+            if index_file.exists():
+                return FileResponse(str(index_file))
+            return {"error": "Frontend not found"}
 
     return app

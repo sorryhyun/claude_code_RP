@@ -5,11 +5,22 @@ This module provides type-safe access to environment variables with validation.
 All settings are loaded once at application startup.
 """
 
+import tempfile
 from pathlib import Path
 from typing import List, Literal, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+from core.paths import get_work_dir
+
+
+def _get_default_agent_cwd() -> str:
+    """Get a platform-appropriate default directory for Claude Agent SDK."""
+    # Use system temp directory (works on both Windows and Unix)
+    temp_dir = Path(tempfile.gettempdir()) / "claude-agent-sandbox"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return str(temp_dir)
 
 
 class Settings(BaseSettings):
@@ -49,7 +60,7 @@ class Settings(BaseSettings):
     debug_agents: bool = False
 
     # Agent SDK configuration
-    agent_cwd: str = "/tmp/claude-empty"
+    agent_cwd: str = ""  # Will be set to platform-appropriate default via validator
     agent_pool_max_size: int = 50  # Maximum number of concurrent SDK clients
     agent_pool_lock_timeout: float = 30.0  # Seconds to wait for connection lock
 
@@ -119,6 +130,18 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.lower() == "true"
         return False
+
+    @field_validator("agent_cwd", mode="before")
+    @classmethod
+    def validate_agent_cwd(cls, v: Optional[str]) -> str:
+        """Ensure agent_cwd is a valid, platform-appropriate directory."""
+        if v and v.strip():
+            # User provided a custom path - ensure it exists
+            path = Path(v)
+            path.mkdir(parents=True, exist_ok=True)
+            return str(path)
+        # Use platform-appropriate default
+        return _get_default_agent_cwd()
 
     def get_priority_agent_names(self) -> List[str]:
         """
@@ -207,10 +230,8 @@ def get_settings() -> Settings:
     """
     global _settings
     if _settings is None:
-        # Find .env file in project root (parent of backend/)
-        backend_dir = Path(__file__).parent.parent
-        project_root = backend_dir.parent
-        env_path = project_root / ".env"
+        # Find .env file (handles both dev and frozen exe modes)
+        env_path = get_work_dir() / ".env"
 
         # Create settings with explicit env file path
         if env_path.exists():

@@ -48,6 +48,7 @@ dev = [
     "faker>=33.1.0",
     "pre-commit>=4.0.0",
     "ruff>=0.8.4",
+    "pyinstaller>=6.0.0",
 ]
 
 [tool.ruff]
@@ -114,3 +115,6 @@ test-verbose = { shell = "cd backend && pytest -v --cov=backend --cov-report=ter
 
 # Installation
 install-all = { shell = "uv sync && cd frontend && npm install", help = "Install all dependencies (backend + frontend)" }
+
+# Build
+build-exe = { shell = "cd frontend && npm run build && cd .. && pyinstaller ClaudeCodeRP.spec --noconfirm", help = "Build Windows executable" }
