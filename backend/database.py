@@ -1,92 +1,49 @@
-import asyncio
-import logging
-from functools import wraps
+"""
+Database configuration for PostgreSQL.
 
-from sqlalchemy import event
-from sqlalchemy.exc import DBAPIError, OperationalError
+This module provides the database engine, session maker, and initialization functions
+for the application's PostgreSQL database.
+"""
+
+import logging
+
+from core import get_settings
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = "sqlite+aiosqlite:///./chitchats.db"
+# Get settings for database configuration
+settings = get_settings()
 
-# Configure engine with WAL mode and increased timeout for better concurrency
+# Configure PostgreSQL engine with connection pooling
+# Note: async engines automatically use AsyncAdaptedQueuePool
 engine = create_async_engine(
-    DATABASE_URL,
+    settings.database_url,
     echo=False,
-    poolclass=NullPool,  # Disable connection pooling for SQLite
-    connect_args={
-        "timeout": 30,  # Increase timeout to 30 seconds
-        "check_same_thread": False,
-    },
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
+    pool_pre_ping=True,  # Verify connections before use
 )
 
-
-# Enable WAL mode for better concurrent access
-@event.listens_for(engine.sync_engine, "connect")
-def set_sqlite_pragma(dbapi_conn, connection_record):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=30000")  # 30 seconds in milliseconds
-    cursor.close()
-
-
-async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async_session_maker = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
 
 Base = declarative_base()
 
 
-def retry_on_db_lock(max_retries=5, initial_delay=0.1, backoff_factor=2):
-    """
-    Decorator to retry database operations on lock errors.
-
-    Args:
-        max_retries: Maximum number of retry attempts
-        initial_delay: Initial delay between retries in seconds
-        backoff_factor: Multiplier for delay after each retry
-    """
-
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            delay = initial_delay
-            last_exception = None
-
-            for attempt in range(max_retries):
-                try:
-                    return await func(*args, **kwargs)
-                except (OperationalError, DBAPIError) as e:
-                    # Check if it's a database locked error
-                    if "database is locked" in str(e).lower():
-                        last_exception = e
-                        if attempt < max_retries - 1:
-                            logger.warning(
-                                f"Database locked on attempt {attempt + 1}/{max_retries} "
-                                f"for {func.__name__}, retrying in {delay}s..."
-                            )
-                            await asyncio.sleep(delay)
-                            delay *= backoff_factor
-                        else:
-                            logger.error(f"Database locked after {max_retries} attempts for {func.__name__}")
-                    else:
-                        # Re-raise if it's not a lock error
-                        raise
-                except Exception:
-                    # Re-raise any other exceptions immediately
-                    raise
-
-            # If we exhausted all retries, raise the last exception
-            if last_exception:
-                raise last_exception
-
-        return wrapper
-
-    return decorator
-
-
 async def get_db():
+    """
+    Dependency that yields database sessions.
+
+    Yields:
+        AsyncSession: Database session for the request
+    """
     async with async_session_maker() as session:
         yield session
 

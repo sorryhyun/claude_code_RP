@@ -13,7 +13,7 @@ from domain.agent_config import AgentConfigData
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from .helpers import bool_to_sqlite, merge_agent_configs, save_base64_profile_pic
+from .helpers import merge_agent_configs, save_base64_profile_pic
 
 logger = logging.getLogger("CRUD")
 
@@ -41,6 +41,23 @@ async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> models.A
 
     system_prompt = build_system_prompt(agent.name, final_config)
 
+    # Load group config to get interrupt_every_turn, priority, and transparent if agent belongs to a group
+    interrupt_every_turn = agent.interrupt_every_turn  # Use provided value by default
+    priority = agent.priority  # Use provided value by default
+    transparent = agent.transparent  # Use provided value by default
+
+    if agent.group:
+        from config.loaders import get_group_config
+
+        group_config = get_group_config(agent.group)
+        # Override with group config if present
+        if "interrupt_every_turn" in group_config:
+            interrupt_every_turn = group_config["interrupt_every_turn"]
+        if "priority" in group_config:
+            priority = group_config["priority"]
+        if "transparent" in group_config:
+            transparent = group_config["transparent"]
+
     db_agent = models.Agent(
         name=agent.name,
         group=agent.group,
@@ -50,7 +67,10 @@ async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> models.A
         characteristics=final_config.characteristics,
         recent_events=final_config.recent_events,
         system_prompt=system_prompt,
-        is_critic=bool_to_sqlite(agent.is_critic),
+        is_critic=agent.is_critic,
+        interrupt_every_turn=bool(interrupt_every_turn),
+        priority=priority,
+        transparent=bool(transparent),
     )
     db.add(db_agent)
     await db.commit()
@@ -171,7 +191,32 @@ async def reload_agent_from_config(db: AsyncSession, agent_id: int) -> Optional[
     agent.profile_pic = config_data.profile_pic
 
     # Auto-detect if agent is a critic based on name
-    agent.is_critic = bool_to_sqlite(agent.name.lower() == "critic")
+    agent.is_critic = agent.name.lower() == "critic"
+
+    # Load group config to update interrupt_every_turn, priority, and transparent if agent belongs to a group
+    if agent.group:
+        from config.loaders import get_group_config
+
+        group_config = get_group_config(agent.group)
+        if "interrupt_every_turn" in group_config:
+            agent.interrupt_every_turn = bool(group_config["interrupt_every_turn"])
+        else:
+            agent.interrupt_every_turn = False  # Reset to default if not in group config
+
+        if "priority" in group_config:
+            agent.priority = group_config["priority"]
+        else:
+            agent.priority = 0  # Reset to default if not in group config
+
+        if "transparent" in group_config:
+            agent.transparent = bool(group_config["transparent"])
+        else:
+            agent.transparent = False  # Reset to default if not in group config
+    else:
+        # Reset to defaults if no group
+        agent.interrupt_every_turn = False
+        agent.priority = 0
+        agent.transparent = False
 
     # Rebuild system prompt from updated values using centralized helper
     from services.prompt_builder import build_system_prompt

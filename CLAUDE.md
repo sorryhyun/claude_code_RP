@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Claude Code Role Play is a multi-Claude chat room application where multiple Claude AI agents with different personalities can interact in real-time chat rooms.
 
 **Tech Stack:**
-- Backend: FastAPI + SQLAlchemy (async) + SQLite
+- Backend: FastAPI + SQLAlchemy (async) + PostgreSQL
 - Frontend: React + TypeScript + Vite + Tailwind CSS
 - AI Integration: Anthropic Claude Agent SDK
 - Real-time Communication: HTTP Polling (4-second intervals)
@@ -45,7 +45,7 @@ uv run ruff check --fix .
 ### Backend
 - **FastAPI** application with REST API and polling endpoints
 - **Multi-agent orchestration** with Claude SDK integration
-- **SQLite** database with async SQLAlchemy and write queue serialization
+- **PostgreSQL** database with async SQLAlchemy and connection pooling
 - **Background scheduler** for autonomous agent conversations
 - **In-memory caching** for performance optimization
 - **Modular configuration** with hot-reloading and startup validation
@@ -58,7 +58,6 @@ uv run ruff check --fix .
   - Agents continue conversations in background when user is not in room
   - Cached database queries and filesystem reads (70-90% performance improvement)
   - Modular tool architecture (action_tools, guidelines_tools, brain_tools)
-  - Write queue for SQLite contention elimination
   - Comprehensive config validation with startup diagnostics
 
 **For detailed backend documentation**, see [backend/README.md](backend/README.md) which includes:
@@ -242,12 +241,24 @@ debug:
 
    See [SETUP.md](SETUP.md) for detailed instructions.
 
-3. **Run development servers:**
+3. **Set up PostgreSQL database:**
+   ```bash
+   # Create database (example using psql)
+   createdb chitchats
+
+   # Configure DATABASE_URL in .env
+   # DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/chitchats
+
+   # If migrating from SQLite, run migration script
+   python scripts/migrate_sqlite_to_postgres.py
+   ```
+
+4. **Run development servers:**
    ```bash
    make dev
    ```
 
-4. **Access application:**
+5. **Access application:**
    - Frontend: http://localhost:5173
    - Backend API: http://localhost:8000
    - API Docs: http://localhost:8000/docs
@@ -259,8 +270,15 @@ debug:
 ### Backend Environment Variables (`.env`)
 
 **Required:**
+- `DATABASE_URL` - PostgreSQL connection URL (format: `postgresql+asyncpg://user:pass@host:port/dbname`)
 - `API_KEY_HASH` - Bcrypt hash of your password (generate with `python generate_hash.py`)
 - `JWT_SECRET` - Secret key for signing JWT tokens (generate with `python -c "import secrets; print(secrets.token_hex(32))"`)
+
+**Optional (Database):**
+- `DB_POOL_SIZE` - Connection pool size (default: 5)
+- `DB_MAX_OVERFLOW` - Maximum overflow connections (default: 10)
+- `DB_POOL_TIMEOUT` - Pool connection timeout in seconds (default: 30)
+- `DB_POOL_RECYCLE` - Connection recycle time in seconds (default: 1800)
 
 **Optional:**
 - `USER_NAME` - Display name for user messages in chat (default: "User")
@@ -281,9 +299,11 @@ debug:
 - No ANTHROPIC_API_KEY configuration is needed for the SDK
 
 ### Database
-- **Location:** `backend/chitchats.db`
+- **Type:** PostgreSQL with async SQLAlchemy (asyncpg driver)
+- **Configuration:** Set `DATABASE_URL` in `.env` (format: `postgresql+asyncpg://user:pass@host:port/dbname`)
+- **Connection Pooling:** Configurable via `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`, `DB_POOL_RECYCLE`
 - **Migrations:** Automatic schema updates via `backend/utils/migrations.py` (no manual deletion needed)
-- **Complete Reset:** Delete file and restart backend to recreate from scratch
+- **Data Migration:** Run `python scripts/migrate_sqlite_to_postgres.py` to migrate existing SQLite data
 
 ### CORS Configuration
 - CORS is configured in `main.py` using environment variables

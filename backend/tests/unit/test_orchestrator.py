@@ -336,7 +336,11 @@ class TestProcessAgentResponses:
 
         with patch("orchestration.orchestrator.crud.get_room_cached", return_value=paused_room):
             await orchestrator._process_agent_responses(
-                orch_context=mock_orch_context, agents=[], critic_agents=[], user_message_content="Hello"
+                orch_context=mock_orch_context,
+                agents=[],
+                interrupt_agents=[],
+                critic_agents=[],
+                user_message_content="Hello",
             )
 
             # Should exit early without processing
@@ -360,7 +364,11 @@ class TestProcessAgentResponses:
             patch.object(orchestrator, "_follow_up_rounds", new=AsyncMock()) as mock_follow_up,
         ):
             await orchestrator._process_agent_responses(
-                orch_context=mock_orch_context, agents=[mock_agent], critic_agents=[], user_message_content="Hello"
+                orch_context=mock_orch_context,
+                agents=[mock_agent],
+                interrupt_agents=[],
+                critic_agents=[],
+                user_message_content="Hello",
             )
 
             # Should call initial responses
@@ -385,6 +393,7 @@ class TestProcessAgentResponses:
             await orchestrator._process_agent_responses(
                 orch_context=mock_orch_context,
                 agents=[mock_agent],  # Only one agent
+                interrupt_agents=[],
                 critic_agents=[],
                 user_message_content="Hello",
             )
@@ -412,6 +421,7 @@ class TestProcessAgentResponses:
             await orchestrator._process_agent_responses(
                 orch_context=mock_orch_context,
                 agents=[mock_agent],
+                interrupt_agents=[],
                 critic_agents=[mock_critic],
                 user_message_content="Hello",
             )
@@ -433,8 +443,8 @@ class TestInitialAgentResponses:
         # Mock active room
         active_room = Mock(is_paused=False)
 
-        # Create multiple mock agents
-        agents = [Mock(id=i, name=f"Agent{i}") for i in range(3)]
+        # Create multiple mock agents (without priority)
+        agents = [Mock(id=i, name=f"Agent{i}", priority=0, transparent=False) for i in range(3)]
 
         with (
             patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
@@ -443,7 +453,11 @@ class TestInitialAgentResponses:
             ) as mock_generate,
         ):
             total = await orchestrator._initial_agent_responses(
-                orch_context=mock_orch_context, agents=agents, user_message_content="Hello", total_messages=0
+                orch_context=mock_orch_context,
+                agents=agents,
+                interrupt_agents=[],
+                user_message_content="Hello",
+                total_messages=0,
             )
 
             # Should have called generate_response for each agent
@@ -460,7 +474,7 @@ class TestInitialAgentResponses:
         mock_orch_context = Mock(db=mock_db, room_id=1)
 
         active_room = Mock(is_paused=False)
-        agents = [Mock(id=1), Mock(id=2), Mock(id=3)]
+        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False), Mock(id=3, priority=0, transparent=False)]
 
         # Mock some agents skipping
         async def mock_generate(orch_context, agent, user_message_content):
@@ -472,7 +486,11 @@ class TestInitialAgentResponses:
             patch.object(orchestrator.response_generator, "generate_response", side_effect=mock_generate),
         ):
             total = await orchestrator._initial_agent_responses(
-                orch_context=mock_orch_context, agents=agents, user_message_content="Hello", total_messages=0
+                orch_context=mock_orch_context,
+                agents=agents,
+                interrupt_agents=[],
+                user_message_content="Hello",
+                total_messages=0,
             )
 
             # Should count only 2 responses (agent 2 skipped)
@@ -490,7 +508,7 @@ class TestFollowUpRounds:
         mock_orch_context = Mock(db=mock_db, room_id=1)
 
         active_room = Mock(is_paused=False, max_interactions=None)
-        agents = [Mock(id=1), Mock(id=2)]
+        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False)]
 
         call_count = 0
 
@@ -505,7 +523,9 @@ class TestFollowUpRounds:
             patch.object(orchestrator, "_count_agent_messages", return_value=0),
             patch.object(orchestrator.response_generator, "generate_response", side_effect=mock_generate),
         ):
-            await orchestrator._follow_up_rounds(orch_context=mock_orch_context, agents=agents, total_messages=0)
+            await orchestrator._follow_up_rounds(
+                orch_context=mock_orch_context, agents=agents, interrupt_agents=[], total_messages=0
+            )
 
             # Should have run 2 rounds with 2 agents each = 4 calls
             assert call_count == 4
@@ -518,14 +538,16 @@ class TestFollowUpRounds:
         mock_orch_context = Mock(db=mock_db, room_id=1)
 
         active_room = Mock(is_paused=False, max_interactions=None)
-        agents = [Mock(id=1), Mock(id=2)]
+        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False)]
 
         with (
             patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
             patch.object(orchestrator, "_count_agent_messages", return_value=0),
             patch.object(orchestrator.response_generator, "generate_response", return_value=False),
         ):  # All skip
-            await orchestrator._follow_up_rounds(orch_context=mock_orch_context, agents=agents, total_messages=0)
+            await orchestrator._follow_up_rounds(
+                orch_context=mock_orch_context, agents=agents, interrupt_agents=[], total_messages=0
+            )
 
             # Should stop after first round where all agents skipped
             # No assertion needed - test passes if it completes without hanging
@@ -539,7 +561,7 @@ class TestFollowUpRounds:
 
         # Room has max 5 interactions, and already has 4
         active_room = Mock(is_paused=False, max_interactions=5)
-        agents = [Mock(id=1), Mock(id=2)]
+        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False)]
 
         call_count = 0
         message_count = 4  # Start with 4 messages
@@ -559,7 +581,9 @@ class TestFollowUpRounds:
             patch.object(orchestrator, "_count_agent_messages", side_effect=mock_count_messages),
             patch.object(orchestrator.response_generator, "generate_response", side_effect=mock_generate),
         ):
-            await orchestrator._follow_up_rounds(orch_context=mock_orch_context, agents=agents, total_messages=0)
+            await orchestrator._follow_up_rounds(
+                orch_context=mock_orch_context, agents=agents, interrupt_agents=[], total_messages=0
+            )
 
             # Should only allow 1 more message (to reach limit of 5)
             assert call_count == 1

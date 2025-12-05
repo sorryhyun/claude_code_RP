@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
-from utils.serializers import serialize_sqlite_bool as _serialize_sqlite_bool
 from utils.serializers import serialize_utc_datetime as _serialize_utc_datetime
 
 # Input length limits to prevent DoS and database bloat
@@ -37,6 +36,9 @@ class AgentBase(BaseModel):
     characteristics: Optional[str] = Field(None, max_length=MAX_CHARACTERISTICS_LENGTH)
     recent_events: Optional[str] = Field(None, max_length=MAX_RECENT_EVENTS_LENGTH)
     is_critic: bool = False
+    interrupt_every_turn: bool = False  # Always respond after any message
+    priority: int = 0  # Response order (higher = responds first)
+    transparent: bool = False  # Messages don't trigger other agents
 
 
 class AgentCreate(AgentBase):
@@ -69,10 +71,6 @@ class Agent(AgentBase):
     def serialize_created_at(self, dt: datetime, _info):
         return _serialize_utc_datetime(dt)
 
-    @field_serializer("is_critic")
-    def serialize_is_critic(self, value: int, _info):
-        return _serialize_sqlite_bool(value)
-
     class Config:
         from_attributes = True
 
@@ -88,6 +86,7 @@ class MessageBase(BaseModel):
 class MessageCreate(MessageBase):
     agent_id: Optional[int] = None
     thinking: Optional[str] = Field(None, max_length=MAX_THINKING_LENGTH)
+    mentioned_agent_ids: Optional[List[int]] = None  # Agent IDs from @mentions
 
 
 class Message(MessageBase):
@@ -205,10 +204,6 @@ class Room(RoomBase):
     def serialize_last_read_at(self, dt: Optional[datetime], _info):
         return _serialize_utc_datetime(dt) if dt else None
 
-    @field_serializer("is_paused")
-    def serialize_is_paused(self, value: int, _info):
-        return _serialize_sqlite_bool(value)
-
     class Config:
         from_attributes = True
 
@@ -234,10 +229,6 @@ class RoomSummary(RoomBase):
     @field_serializer("last_read_at")
     def serialize_last_read_at(self, dt: Optional[datetime], _info):
         return _serialize_utc_datetime(dt) if dt else None
-
-    @field_serializer("is_paused")
-    def serialize_is_paused(self, value: int, _info):
-        return _serialize_sqlite_bool(value)
 
     class Config:
         from_attributes = True

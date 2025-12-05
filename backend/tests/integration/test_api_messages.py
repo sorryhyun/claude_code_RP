@@ -157,7 +157,7 @@ class TestCriticMessages:
         from models import Agent, Message
 
         # Create a critic agent
-        critic = Agent(name="critic_agent", system_prompt="You are a critic.", is_critic=1)
+        critic = Agent(name="critic_agent", system_prompt="You are a critic.", is_critic=True)
         test_db.add(critic)
         await test_db.commit()
         await test_db.refresh(critic)

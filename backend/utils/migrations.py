@@ -2,7 +2,8 @@
 Database migration utilities for Claude Code Role Play.
 
 This module provides automatic schema migration functionality to handle
-database upgrades without requiring manual deletion of the database file.
+database upgrades without requiring manual database recreation.
+PostgreSQL-compatible version.
 """
 
 import logging
@@ -12,6 +13,34 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
+
+
+async def _column_exists(conn, table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table using PostgreSQL information_schema."""
+    result = await conn.execute(
+        text("""
+            SELECT COUNT(*) as count
+            FROM information_schema.columns
+            WHERE table_name = :table AND column_name = :column
+        """),
+        {"table": table_name, "column": column_name}
+    )
+    row = result.first()
+    return row is not None and row.count > 0
+
+
+async def _index_exists(conn, table_name: str, index_name: str) -> bool:
+    """Check if an index exists on a table using PostgreSQL pg_indexes."""
+    result = await conn.execute(
+        text("""
+            SELECT COUNT(*) as count
+            FROM pg_indexes
+            WHERE tablename = :table AND indexname = :index
+        """),
+        {"table": table_name, "index": index_name}
+    )
+    row = result.first()
+    return row is not None and row.count > 0
 
 
 async def run_migrations(engine: AsyncEngine):
@@ -24,121 +53,91 @@ async def run_migrations(engine: AsyncEngine):
     Args:
         engine: SQLAlchemy async engine connected to the database
     """
-    logger.info("🔄 Running database migrations...")
+    logger.info("Running database migrations...")
 
     async with engine.begin() as conn:
-        # Migration 1: Add participant fields to messages table (PR #11)
+        # Migration 1: Add participant fields to messages table
         await _add_participant_fields(conn)
 
-        # Migration 2: Add is_critic field to agents table (PR #11)
+        # Migration 2: Add is_critic field to agents table
         await _add_is_critic_field(conn)
 
-        # Migration 3: Fix existing Critic agents to have is_critic=1
+        # Migration 3: Fix existing Critic agents to have is_critic=true
         await _fix_critic_agents(conn)
 
-        # Migration 4: Add anti_pattern field to agents table
-        await _add_anti_pattern_field(conn)
-
-        # Migration 5: Refresh profile_pic data from filesystem
+        # Migration 4: Refresh profile_pic data from filesystem
         await _refresh_profile_pics(conn)
 
-        # Migration 6: Reload system prompt for all agents
+        # Migration 5: Reload system prompt for all agents
         await _reload_system_prompts(conn)
 
-        # Migration 7: Add group field to agents table
+        # Migration 6: Add group field to agents table
         await _add_group_field(conn)
 
-        # Migration 8: Sync agent paths and groups from filesystem
+        # Migration 7: Sync agent paths and groups from filesystem
         await _sync_agent_paths_from_filesystem(conn)
 
-        # Migration 9: Add last_read_at field to rooms table
+        # Migration 8: Add last_read_at field to rooms table
         await _add_last_read_at_field(conn)
 
-        # Migration 10: Remove backgrounds and memory columns from agents table
+        # Migration 9: Remove deprecated memory columns from agents table
         await _remove_deprecated_memory_fields(conn)
 
-        # Migration 11: Add composite index for room/timestamp on messages
+        # Migration 10: Add composite index for room/timestamp on messages
         await _add_message_timestamp_index(conn)
 
-        # Migration 12: Add index for room last_activity_at lookups
+        # Migration 11: Add index for room last_activity_at lookups
         await _add_last_activity_index(conn)
 
-        # Migration 13: Remove anti_pattern column from agents table
+        # Migration 12: Remove anti_pattern column from agents table
         await _remove_anti_pattern_field(conn)
 
-        # Migration 14: Add owner_id to rooms and scope uniqueness by owner
+        # Migration 13: Add owner_id to rooms and scope uniqueness by owner
         await _add_room_owner_and_scoped_uniqueness(conn)
 
-        # Migration 15: Add joined_at to room_agents for invitation tracking
+        # Migration 14: Add joined_at to room_agents for invitation tracking
         await _add_joined_at_to_room_agents(conn)
 
-        # Migration 16: Add image_data column to messages for image attachments
+        # Migration 15: Add image_data column to messages for image attachments
         await _add_image_data_to_messages(conn)
 
-    logger.info("✅ Database migrations completed")
+        # Migration 16: Add group config fields to agents table
+        await _add_group_config_fields(conn)
+
+    logger.info("Database migrations completed")
 
 
 async def _add_participant_fields(conn):
     """Add participant_type and participant_name columns to messages table."""
-    # Check if participant_type column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('messages') WHERE name='participant_type'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _column_exists(conn, 'messages', 'participant_type'):
         logger.info("  Adding participant_type column to messages table...")
         await conn.execute(text("ALTER TABLE messages ADD COLUMN participant_type VARCHAR"))
-        logger.info("  ✓ Added participant_type column")
+        logger.info("  Added participant_type column")
 
-    # Check if participant_name column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('messages') WHERE name='participant_name'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _column_exists(conn, 'messages', 'participant_name'):
         logger.info("  Adding participant_name column to messages table...")
         await conn.execute(text("ALTER TABLE messages ADD COLUMN participant_name VARCHAR"))
-        logger.info("  ✓ Added participant_name column")
+        logger.info("  Added participant_name column")
 
 
 async def _add_is_critic_field(conn):
     """Add is_critic column to agents table."""
-    # Check if is_critic column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('agents') WHERE name='is_critic'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _column_exists(conn, 'agents', 'is_critic'):
         logger.info("  Adding is_critic column to agents table...")
-        await conn.execute(text("ALTER TABLE agents ADD COLUMN is_critic INTEGER DEFAULT 0"))
-        logger.info("  ✓ Added is_critic column")
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN is_critic BOOLEAN DEFAULT FALSE"))
+        logger.info("  Added is_critic column")
 
 
 async def _fix_critic_agents(conn):
-    """Fix existing agents named 'Critic' to have is_critic=1."""
+    """Fix existing agents named 'Critic' to have is_critic=true."""
     logger.info("  Checking for Critic agents to fix...")
-    result = await conn.execute(text("UPDATE agents SET is_critic = 1 WHERE LOWER(name) = 'critic' AND is_critic = 0"))
+    result = await conn.execute(
+        text("UPDATE agents SET is_critic = TRUE WHERE LOWER(name) = 'critic' AND is_critic = FALSE")
+    )
     if result.rowcount > 0:
-        logger.info(f"  ✓ Fixed {result.rowcount} Critic agent(s) to have is_critic=1")
+        logger.info(f"  Fixed {result.rowcount} Critic agent(s) to have is_critic=true")
     else:
         logger.info("  No Critic agents needed fixing")
-
-
-async def _add_anti_pattern_field(conn):
-    """Add anti_pattern column to agents table."""
-    # Check if anti_pattern column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('agents') WHERE name='anti_pattern'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
-        logger.info("  Adding anti_pattern column to agents table...")
-        await conn.execute(text("ALTER TABLE agents ADD COLUMN anti_pattern TEXT"))
-        logger.info("  ✓ Added anti_pattern column")
 
 
 async def _refresh_profile_pics(conn):
@@ -209,11 +208,11 @@ async def _refresh_profile_pics(conn):
             await conn.execute(
                 text("UPDATE agents SET profile_pic = :pic WHERE id = :id"), {"pic": found_pic, "id": agent_id}
             )
-            logger.info(f"  ✓ Updated profile_pic for '{agent_name}': {found_pic}")
+            logger.info(f"  Updated profile_pic for '{agent_name}': {found_pic}")
             updated_count += 1
 
     if updated_count > 0:
-        logger.info(f"  ✓ Refreshed profile_pic for {updated_count} agent(s)")
+        logger.info(f"  Refreshed profile_pic for {updated_count} agent(s)")
     else:
         logger.info("  No profile_pic updates needed")
 
@@ -271,21 +270,17 @@ async def _reload_system_prompts(conn):
         )
         updated_count += 1
 
-    logger.info(f"  ✓ Reloaded system prompt for {updated_count} agent(s)")
+    logger.info(f"  Reloaded system prompt for {updated_count} agent(s)")
 
 
 async def _add_group_field(conn):
     """Add group column to agents table."""
-    # Check if group column exists
-    result = await conn.execute(text("SELECT COUNT(*) as count FROM pragma_table_info('agents') WHERE name='group'"))
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _column_exists(conn, 'agents', 'group'):
         logger.info("  Adding group column to agents table...")
         await conn.execute(text('ALTER TABLE agents ADD COLUMN "group" VARCHAR'))
         # Create index on group column
         await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_agents_group ON agents("group")'))
-        logger.info("  ✓ Added group column with index")
+        logger.info("  Added group column with index")
 
 
 async def _sync_agent_paths_from_filesystem(conn):
@@ -318,7 +313,7 @@ async def _sync_agent_paths_from_filesystem(conn):
 
         # Check if agent exists in filesystem
         if agent_name not in available_configs:
-            logger.warning(f"  ⚠ Agent '{agent_name}' not found in filesystem, skipping")
+            logger.warning(f"  Agent '{agent_name}' not found in filesystem, skipping")
             continue
 
         # Get correct path and group from filesystem
@@ -332,27 +327,21 @@ async def _sync_agent_paths_from_filesystem(conn):
                 text('UPDATE agents SET config_file = :path, "group" = :group WHERE id = :id'),
                 {"path": correct_path, "group": correct_group, "id": agent_id},
             )
-            logger.info(f"  ✓ Updated '{agent_name}': path={correct_path}, group={correct_group}")
+            logger.info(f"  Updated '{agent_name}': path={correct_path}, group={correct_group}")
             updated_count += 1
 
     if updated_count > 0:
-        logger.info(f"  ✓ Synced paths/groups for {updated_count} agent(s)")
+        logger.info(f"  Synced paths/groups for {updated_count} agent(s)")
     else:
         logger.info("  No path/group updates needed")
 
 
 async def _add_last_read_at_field(conn):
     """Add last_read_at column to rooms table for tracking unread messages."""
-    # Check if last_read_at column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('rooms') WHERE name='last_read_at'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _column_exists(conn, 'rooms', 'last_read_at'):
         logger.info("  Adding last_read_at column to rooms table...")
-        await conn.execute(text("ALTER TABLE rooms ADD COLUMN last_read_at DATETIME"))
-        logger.info("  ✓ Added last_read_at column")
+        await conn.execute(text("ALTER TABLE rooms ADD COLUMN last_read_at TIMESTAMP"))
+        logger.info("  Added last_read_at column")
 
 
 async def _remove_deprecated_memory_fields(conn):
@@ -360,64 +349,41 @@ async def _remove_deprecated_memory_fields(conn):
     Remove deprecated backgrounds and memory columns from agents table.
 
     These fields have been replaced by consolidated_memory.md files.
-    Uses SQLite's ALTER TABLE DROP COLUMN (requires SQLite 3.35.0+).
-    Falls back gracefully if not supported.
+    PostgreSQL supports ALTER TABLE DROP COLUMN natively.
     """
-    # Check if backgrounds column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('agents') WHERE name='backgrounds'")
-    )
-    row = result.first()
-
-    if row and row.count > 0:
+    if await _column_exists(conn, 'agents', 'backgrounds'):
         logger.info("  Removing deprecated backgrounds column from agents table...")
         try:
             await conn.execute(text("ALTER TABLE agents DROP COLUMN backgrounds"))
-            logger.info("  ✓ Removed backgrounds column")
+            logger.info("  Removed backgrounds column")
         except Exception as e:
-            logger.warning(f"  ⚠ Could not drop backgrounds column (SQLite version may not support it): {e}")
-            logger.info("  Column will remain in database but is unused")
+            logger.warning(f"  Could not drop backgrounds column: {e}")
 
-    # Check if memory column exists
-    result = await conn.execute(text("SELECT COUNT(*) as count FROM pragma_table_info('agents') WHERE name='memory'"))
-    row = result.first()
-
-    if row and row.count > 0:
+    if await _column_exists(conn, 'agents', 'memory'):
         logger.info("  Removing deprecated memory column from agents table...")
         try:
             await conn.execute(text("ALTER TABLE agents DROP COLUMN memory"))
-            logger.info("  ✓ Removed memory column")
+            logger.info("  Removed memory column")
         except Exception as e:
-            logger.warning(f"  ⚠ Could not drop memory column (SQLite version may not support it): {e}")
-            logger.info("  Column will remain in database but is unused")
+            logger.warning(f"  Could not drop memory column: {e}")
 
 
 async def _add_message_timestamp_index(conn):
     """Add composite index on messages(room_id, timestamp) if missing."""
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_index_list('messages') WHERE name='idx_message_room_timestamp'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _index_exists(conn, 'messages', 'idx_message_room_timestamp'):
         logger.info("  Adding idx_message_room_timestamp index to messages table...")
         await conn.execute(text("CREATE INDEX idx_message_room_timestamp ON messages (room_id, timestamp)"))
-        logger.info("  ✓ Added idx_message_room_timestamp index")
+        logger.info("  Added idx_message_room_timestamp index")
     else:
         logger.info("  idx_message_room_timestamp index already exists")
 
 
 async def _add_last_activity_index(conn):
     """Add index on rooms.last_activity_at for active room lookups."""
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_index_list('rooms') WHERE name='ix_rooms_last_activity_at'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _index_exists(conn, 'rooms', 'ix_rooms_last_activity_at'):
         logger.info("  Adding ix_rooms_last_activity_at index to rooms table...")
         await conn.execute(text("CREATE INDEX ix_rooms_last_activity_at ON rooms (last_activity_at)"))
-        logger.info("  ✓ Added ix_rooms_last_activity_at index")
+        logger.info("  Added ix_rooms_last_activity_at index")
     else:
         logger.info("  ix_rooms_last_activity_at index already exists")
 
@@ -428,107 +394,70 @@ async def _remove_anti_pattern_field(conn):
 
     This field is being disabled to allow observation of agent behavior
     before deciding on a refactored approach.
-    Uses SQLite's ALTER TABLE DROP COLUMN (requires SQLite 3.35.0+).
-    Falls back gracefully if not supported.
+    PostgreSQL supports ALTER TABLE DROP COLUMN natively.
     """
-    # Check if anti_pattern column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('agents') WHERE name='anti_pattern'")
-    )
-    row = result.first()
-
-    if row and row.count > 0:
+    if await _column_exists(conn, 'agents', 'anti_pattern'):
         logger.info("  Removing anti_pattern column from agents table...")
         try:
             await conn.execute(text("ALTER TABLE agents DROP COLUMN anti_pattern"))
-            logger.info("  ✓ Removed anti_pattern column")
+            logger.info("  Removed anti_pattern column")
         except Exception as e:
-            logger.warning(f"  ⚠ Could not drop anti_pattern column (SQLite version may not support it): {e}")
-            logger.info("  Column will remain in database but is unused")
+            logger.warning(f"  Could not drop anti_pattern column: {e}")
 
 
 async def _add_room_owner_and_scoped_uniqueness(conn):
     """Add owner_id column and enforce room-name uniqueness per owner."""
-
-    # Check existing schema
-    result = await conn.execute(text("PRAGMA table_info('rooms')"))
-    columns = result.fetchall()
-    has_owner_column = any(col.name == "owner_id" for col in columns)
-
-    result = await conn.execute(text("PRAGMA index_list('rooms')"))
-    indexes = result.fetchall()
-    has_composite_unique = any(index.name == "ux_rooms_owner_name" for index in indexes)
+    has_owner_column = await _column_exists(conn, 'rooms', 'owner_id')
+    has_composite_unique = await _index_exists(conn, 'rooms', 'ux_rooms_owner_name')
 
     if has_owner_column and has_composite_unique:
         logger.info("  Rooms table already has owner_id and scoped uniqueness")
         return
 
-    logger.info("  Rebuilding rooms table with owner_id and per-owner unique constraint...")
+    if not has_owner_column:
+        logger.info("  Adding owner_id column to rooms table...")
+        await conn.execute(text("ALTER TABLE rooms ADD COLUMN owner_id VARCHAR"))
+        # Set default owner for existing rooms
+        await conn.execute(text("UPDATE rooms SET owner_id = 'admin' WHERE owner_id IS NULL"))
+        # Create index on owner_id
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_rooms_owner_id ON rooms(owner_id)"))
+        logger.info("  Added owner_id column")
 
-    await conn.execute(text("PRAGMA foreign_keys=off"))
-    await conn.execute(text("ALTER TABLE rooms RENAME TO rooms_old"))
-
-    await conn.execute(
-        text(
-            """
-            CREATE TABLE rooms (
-                id INTEGER NOT NULL PRIMARY KEY,
-                owner_id VARCHAR,
-                name VARCHAR NOT NULL,
-                max_interactions INTEGER,
-                is_paused INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT (CURRENT_TIMESTAMP),
-                last_activity_at DATETIME DEFAULT (CURRENT_TIMESTAMP),
-                last_read_at DATETIME
-            );
-            """
-        )
-    )
-
-    await conn.execute(text("CREATE UNIQUE INDEX ux_rooms_owner_name ON rooms(owner_id, name)"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_rooms_last_activity_at ON rooms(last_activity_at)"))
-
-    if has_owner_column:
-        insert_sql = (
-            "INSERT INTO rooms (id, owner_id, name, max_interactions, is_paused, created_at, last_activity_at, last_read_at) "
-            "SELECT id, owner_id, name, max_interactions, is_paused, created_at, last_activity_at, last_read_at FROM rooms_old"
-        )
-    else:
-        insert_sql = (
-            "INSERT INTO rooms (id, owner_id, name, max_interactions, is_paused, created_at, last_activity_at, last_read_at) "
-            "SELECT id, 'admin' as owner_id, name, max_interactions, is_paused, created_at, last_activity_at, last_read_at FROM rooms_old"
-        )
-
-    await conn.execute(text(insert_sql))
-
-    await conn.execute(text("DROP TABLE rooms_old"))
-    await conn.execute(text("PRAGMA foreign_keys=on"))
-    logger.info("  ✓ Rooms table rebuilt with owner_id and scoped uniqueness")
+    if not has_composite_unique:
+        logger.info("  Adding unique constraint on (owner_id, name)...")
+        await conn.execute(text("CREATE UNIQUE INDEX ux_rooms_owner_name ON rooms(owner_id, name)"))
+        logger.info("  Added scoped uniqueness constraint")
 
 
 async def _add_joined_at_to_room_agents(conn):
     """Add joined_at column to room_agents table for invitation tracking."""
-    # Check if joined_at column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('room_agents') WHERE name='joined_at'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _column_exists(conn, 'room_agents', 'joined_at'):
         logger.info("  Adding joined_at column to room_agents table...")
-        await conn.execute(text("ALTER TABLE room_agents ADD COLUMN joined_at DATETIME"))
-        logger.info("  ✓ Added joined_at column")
+        await conn.execute(text("ALTER TABLE room_agents ADD COLUMN joined_at TIMESTAMP"))
+        logger.info("  Added joined_at column")
 
 
 async def _add_image_data_to_messages(conn):
     """Add image_data column to messages table for image attachments."""
-    # Check if image_data column exists
-    result = await conn.execute(
-        text("SELECT COUNT(*) as count FROM pragma_table_info('messages') WHERE name='image_data'")
-    )
-    row = result.first()
-
-    if row and row.count == 0:
+    if not await _column_exists(conn, 'messages', 'image_data'):
         logger.info("  Adding image_data column to messages table...")
         await conn.execute(text("ALTER TABLE messages ADD COLUMN image_data TEXT"))
-        logger.info("  ✓ Added image_data column for image attachments")
+        logger.info("  Added image_data column for image attachments")
+
+
+async def _add_group_config_fields(conn):
+    """Add interrupt_every_turn, priority, and transparent columns to agents table."""
+    if not await _column_exists(conn, 'agents', 'interrupt_every_turn'):
+        logger.info("  Adding interrupt_every_turn column to agents table...")
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN interrupt_every_turn BOOLEAN DEFAULT FALSE"))
+        logger.info("  Added interrupt_every_turn column")
+
+    if not await _column_exists(conn, 'agents', 'priority'):
+        logger.info("  Adding priority column to agents table...")
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN priority INTEGER DEFAULT 0"))
+        logger.info("  Added priority column")
+
+    if not await _column_exists(conn, 'agents', 'transparent'):
+        logger.info("  Adding transparent column to agents table...")
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN transparent BOOLEAN DEFAULT FALSE"))
+        logger.info("  Added transparent column")

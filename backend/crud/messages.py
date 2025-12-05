@@ -8,14 +8,12 @@ from typing import List
 
 import models
 import schemas
-from database import retry_on_db_lock
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 
-@retry_on_db_lock(max_retries=5, initial_delay=0.1, backoff_factor=2)
 async def create_message(
     db: AsyncSession, room_id: int, message: schemas.MessageCreate, update_room_activity: bool = True
 ) -> models.Message:
@@ -72,7 +70,6 @@ async def create_message(
     return db_message
 
 
-@retry_on_db_lock(max_retries=5, initial_delay=0.1, backoff_factor=2)
 async def create_system_message(
     db: AsyncSession, room_id: int, content: str, update_room_activity: bool = False
 ) -> models.Message:
@@ -258,7 +255,7 @@ async def get_critic_messages(db: AsyncSession, room_id: int) -> List[models.Mes
         .join(models.Agent)
         .options(selectinload(models.Message.agent))
         .where(models.Message.room_id == room_id)
-        .where(models.Agent.is_critic == 1)
+        .where(models.Agent.is_critic == True)  # noqa: E712
         .order_by(models.Message.timestamp)
     )
     return result.scalars().all()

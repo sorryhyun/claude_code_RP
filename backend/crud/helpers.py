@@ -72,20 +72,6 @@ def merge_agent_configs(provided_config, file_config):
     return AgentConfigData(**merged)
 
 
-def bool_to_sqlite(value: bool) -> int:
-    """
-    Convert Python boolean to SQLite integer (0 or 1).
-    SQLite doesn't have a native boolean type, so booleans are stored as integers.
-
-    Args:
-        value: Boolean value to convert
-
-    Returns:
-        1 if True, 0 if False
-    """
-    return 1 if value else 0
-
-
 def save_base64_profile_pic(agent_name: str, base64_data: str) -> bool:
     """
     Save a base64-encoded profile picture to the filesystem.

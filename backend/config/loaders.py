@@ -122,6 +122,72 @@ def get_memory_context_config() -> Dict[str, Any]:
     return get_brain_config()
 
 
+def get_group_config(group_name: str) -> Dict[str, Any]:
+    """
+    Load group-specific configuration from group_config.yaml.
+
+    Args:
+        group_name: Name of the group (e.g., "슈타게", "체인소맨")
+
+    Returns:
+        Dictionary containing group-specific tool overrides, or empty dict if not found
+    """
+    if not group_name:
+        return {}
+
+    from core.paths import get_agents_dir
+
+    group_config_path = get_agents_dir() / f"group_{group_name}" / "group_config.yaml"
+
+    if not group_config_path.exists():
+        logger.debug(f"No group config found for group '{group_name}' at {group_config_path}")
+        return {}
+
+    try:
+        config = get_cached_config(group_config_path)
+        logger.debug(f"Loaded group config for '{group_name}': {list(config.keys())}")
+        return config
+    except Exception as e:
+        logger.warning(f"Error loading group config for '{group_name}': {e}")
+        return {}
+
+
+def merge_tool_configs(base_config: Dict[str, Any], group_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge group-specific tool configurations over base (global) tool configurations.
+
+    Group config can override any field in the base config (e.g., response, description, etc.)
+
+    Args:
+        base_config: Base tools configuration from tools.yaml
+        group_config: Group-specific configuration from group_config.yaml
+
+    Returns:
+        Merged configuration dictionary
+    """
+    if not group_config or "tools" not in group_config:
+        return base_config
+
+    # Deep copy base config to avoid mutation
+    import copy
+
+    merged = copy.deepcopy(base_config)
+
+    # Merge tool overrides from group config
+    group_tools = group_config.get("tools", {})
+    base_tools = merged.get("tools", {})
+
+    for tool_name, tool_overrides in group_tools.items():
+        if tool_name in base_tools:
+            # Merge/override fields for this tool
+            base_tools[tool_name].update(tool_overrides)
+            logger.debug(f"Applied group config override for tool '{tool_name}': {list(tool_overrides.keys())}")
+        else:
+            logger.warning(f"Group config specifies unknown tool '{tool_name}', ignoring")
+
+    return merged
+
+
 __all__ = [
     "CONFIG_DIR",
     "TOOLS_CONFIG",
@@ -136,4 +202,6 @@ __all__ = [
     "get_brain_config",
     "get_memory_tools_config",
     "get_memory_context_config",
+    "get_group_config",
+    "merge_tool_configs",
 ]

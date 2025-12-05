@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from .helpers import bool_to_sqlite, get_room_with_relationships
+from .helpers import get_room_with_relationships
 
 logger = logging.getLogger("CRUD")
 
@@ -98,7 +98,7 @@ async def update_room(db: AsyncSession, room_id: int, room_update: schemas.RoomU
             raise ValueError("max_interactions must be non-negative")
         room.max_interactions = room_update.max_interactions
     if room_update.is_paused is not None:
-        room.is_paused = bool_to_sqlite(room_update.is_paused)
+        room.is_paused = room_update.is_paused
 
     await db.commit()
     await db.refresh(room, attribute_names=["agents", "messages"])

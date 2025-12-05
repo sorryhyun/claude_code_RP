@@ -17,7 +17,6 @@ from fastapi.staticfiles import StaticFiles
 from orchestration import ChatOrchestrator
 from sdk import AgentManager
 from starlette.responses import FileResponse
-from utils.write_queue import start_writer, stop_writer
 
 from core import get_logger, get_settings
 
@@ -69,9 +68,6 @@ def create_app() -> FastAPI:
         from config.config_loader import log_config_validation
 
         log_config_validation()
-
-        # Start write queue for serialized DB writes
-        await start_writer()
 
         # Initialize database
         await init_db()
@@ -130,7 +126,6 @@ def create_app() -> FastAPI:
         # Shutdown orchestrator (cancels active room tasks)
         await chat_orchestrator.shutdown()
         await agent_manager.shutdown()
-        await stop_writer()
         logger.info("✅ Application shutdown complete")
 
     # Initialize rate limiter

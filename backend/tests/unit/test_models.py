@@ -26,7 +26,7 @@ class TestRoomModel:
         assert room.id is not None
         assert room.name == "test_room"
         assert room.max_interactions == 10
-        assert room.is_paused == 0
+        assert room.is_paused == False
         assert isinstance(room.created_at, datetime)
 
     @pytest.mark.unit
@@ -38,7 +38,7 @@ class TestRoomModel:
         await test_db.refresh(room)
 
         assert room.max_interactions is None
-        assert room.is_paused == 0
+        assert room.is_paused == False
         assert room.created_at is not None
 
     @pytest.mark.unit
@@ -84,7 +84,7 @@ class TestAgentModel:
         assert agent.id is not None
         assert agent.name == "test_agent"
         assert agent.group == "test_group"
-        assert agent.is_critic == 0
+        assert agent.is_critic == False
         assert isinstance(agent.created_at, datetime)
 
     @pytest.mark.unit
@@ -103,12 +103,12 @@ class TestAgentModel:
     @pytest.mark.unit
     async def test_agent_critic_flag(self, test_db):
         """Test creating a critic agent."""
-        agent = models.Agent(name="critic_agent", system_prompt="You are a critic.", is_critic=1)
+        agent = models.Agent(name="critic_agent", system_prompt="You are a critic.", is_critic=True)
         test_db.add(agent)
         await test_db.commit()
         await test_db.refresh(agent)
 
-        assert agent.is_critic == 1
+        assert agent.is_critic == True
 
 
 class TestMessageModel:

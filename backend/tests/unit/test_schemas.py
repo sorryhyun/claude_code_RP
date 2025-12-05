@@ -238,12 +238,12 @@ class TestSchemaDatetimeSerialization:
 
 
 class TestSchemaBooleanSerialization:
-    """Tests for SQLite boolean (int) serialization."""
+    """Tests for boolean field serialization."""
 
     @pytest.mark.unit
     async def test_agent_is_critic_serialization(self, test_db):
         """Test Agent is_critic field serialization."""
-        # Create critic agent (is_critic=1)
+        # Create critic agent (is_critic=True)
         agent = schemas.Agent.model_validate(
             type(
                 "Agent",
@@ -253,7 +253,7 @@ class TestSchemaBooleanSerialization:
                     "name": "test",
                     "system_prompt": "test",
                     "created_at": datetime.now(timezone.utc),
-                    "is_critic": 1,  # SQLite integer
+                    "is_critic": True,  # Native boolean
                     "group": None,
                     "config_file": None,
                     "profile_pic": None,
@@ -264,14 +264,14 @@ class TestSchemaBooleanSerialization:
             )()
         )
 
-        # Should be converted to boolean
+        # Should be boolean
         assert agent.is_critic is True
         assert isinstance(agent.is_critic, bool)
 
     @pytest.mark.unit
     async def test_room_is_paused_serialization(self, test_db):
         """Test Room is_paused field serialization."""
-        # Create paused room (is_paused=1)
+        # Create paused room (is_paused=True)
         room = schemas.Room.model_validate(
             type(
                 "Room",
@@ -280,7 +280,7 @@ class TestSchemaBooleanSerialization:
                     "id": 1,
                     "name": "test",
                     "max_interactions": None,
-                    "is_paused": 1,  # SQLite integer
+                    "is_paused": True,  # Native boolean
                     "created_at": datetime.now(timezone.utc),
                     "agents": [],
                     "messages": [],
@@ -288,6 +288,6 @@ class TestSchemaBooleanSerialization:
             )()
         )
 
-        # Should be converted to boolean
+        # Should be boolean
         assert room.is_paused is True
         assert isinstance(room.is_paused, bool)

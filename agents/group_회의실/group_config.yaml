@@ -1,0 +1,6 @@
+
+# Set priority for this group's agents (optional)
+# Higher values = higher priority (agents respond before lower priority agents)
+# Default: 0 (normal priority)
+priority: 2
+

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from database import Base
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Table, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Table, Text
 from sqlalchemy.orm import relationship
 
 # Association table for many-to-many relationship between rooms and agents
@@ -22,7 +22,7 @@ class Room(Base):
     owner_id = Column(String, nullable=True, index=True)
     name = Column(String, nullable=False, index=True)
     max_interactions = Column(Integer, nullable=True)  # Maximum number of agent interactions (None = unlimited)
-    is_paused = Column(Integer, default=0)  # 0 = not paused, 1 = paused (SQLite uses integers for booleans)
+    is_paused = Column(Boolean, default=False)  # Whether the room is paused
     created_at = Column(DateTime, default=datetime.utcnow)
     last_activity_at = Column(
         DateTime, default=datetime.utcnow, index=True
@@ -46,7 +46,10 @@ class Agent(Base):
     characteristics = Column(Text, nullable=True)  # Personality traits and behaviors
     recent_events = Column(Text, nullable=True)  # Short-term recent context
     system_prompt = Column(Text, nullable=False)  # Final combined system prompt
-    is_critic = Column(Integer, default=0)  # 0 = participant, 1 = critic/observer (SQLite uses integers for booleans)
+    is_critic = Column(Boolean, default=False)  # Whether the agent is a critic/observer
+    interrupt_every_turn = Column(Boolean, default=False)  # Always respond after any message
+    priority = Column(Integer, default=0)  # Response order (higher = responds first)
+    transparent = Column(Boolean, default=False)  # Messages don't trigger other agents
     created_at = Column(DateTime, default=datetime.utcnow)
 
     rooms = relationship("Room", secondary=room_agents, back_populates="agents")

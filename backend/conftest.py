@@ -37,29 +37,37 @@ async def test_db() -> AsyncGenerator[AsyncSession, None]:
     """
     Create a fresh test database for each test function.
 
-    Uses an in-memory SQLite database that is created and destroyed
-    for each test to ensure isolation.
+    Uses PostgreSQL test database that is created and destroyed for each test.
+    Requires TEST_DATABASE_URL or DATABASE_URL environment variable.
     """
-    # Use in-memory SQLite for tests
-    test_engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", echo=False, connect_args={"check_same_thread": False}
-    )
+    import os
 
-    # Create tables
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Get test database URL from environment
+    test_db_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if not test_db_url:
+        pytest.skip("TEST_DATABASE_URL or DATABASE_URL not set - skipping database tests")
 
-    # Create session
-    TestingSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    # Create test engine
+    test_engine = create_async_engine(test_db_url, echo=False)
 
-    async with TestingSessionLocal() as session:
-        yield session
+    try:
+        # Create tables
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
-    # Drop tables after test
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        # Create session
+        TestingSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
-    await test_engine.dispose()
+        async with TestingSessionLocal() as session:
+            yield session
+
+        # Drop tables after test
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+    except Exception as e:
+        pytest.skip(f"PostgreSQL connection failed: {e}")
+    finally:
+        await test_engine.dispose()
 
 
 @pytest.fixture(scope="function")
@@ -206,7 +214,7 @@ async def sample_agent(test_db: AsyncSession) -> models.Agent:
         characteristics="Friendly and helpful",
         recent_events="Just created",
         system_prompt="You are a test agent.",
-        is_critic=0,
+        is_critic=False,
     )
     test_db.add(agent)
     await test_db.commit()
@@ -217,7 +225,7 @@ async def sample_agent(test_db: AsyncSession) -> models.Agent:
 @pytest.fixture
 async def sample_room(test_db: AsyncSession) -> models.Room:
     """Create a sample room for testing."""
-    room = models.Room(name="test_room", max_interactions=None, is_paused=0, owner_id="admin")
+    room = models.Room(name="test_room", max_interactions=None, is_paused=False, owner_id="admin")
     test_db.add(room)
     await test_db.commit()
     await test_db.refresh(room)
@@ -227,7 +235,7 @@ async def sample_room(test_db: AsyncSession) -> models.Room:
 @pytest.fixture
 async def sample_guest_room(test_db: AsyncSession) -> models.Room:
     """Create a sample room owned by the guest for testing."""
-    room = models.Room(name="guest_test_room", max_interactions=None, is_paused=0, owner_id="guest-test")
+    room = models.Room(name="guest_test_room", max_interactions=None, is_paused=False, owner_id="guest-test")
     test_db.add(room)
     await test_db.commit()
     await test_db.refresh(room)

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Multi-Claude chat room application backend"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "aiosqlite==0.21.0",
+    "asyncpg>=0.29.0",
     "annotated-doc==0.0.3",
     "annotated-types==0.7.0",
     "APScheduler==3.10.4",

@@ -1,0 +1,19 @@
+# Group Configuration for group_tool
+# This group demonstrates the interrupt_every_turn feature
+
+# Enable interrupt_every_turn for all agents in this group
+# When enabled, agents will always get a turn immediately after any response
+# Example: If agent A says "hello", this group's agents will respond next before other agents
+interrupt_every_turn: true
+priority: 5
+
+# Set priority for this group's agents (optional)
+# Higher values = higher priority (agents respond before lower priority agents)
+# Default: 0 (normal priority)
+# priority: 5
+
+# Make this group's agents "transparent" in turn-taking
+# When enabled, other agents won't be triggered to respond after this agent speaks
+# But other agents CAN still see/read this agent's messages in conversation history
+# Useful for Narrator-type agents whose commentary shouldn't prompt replies
+transparent: true

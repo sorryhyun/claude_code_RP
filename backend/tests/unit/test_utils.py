@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 from utils.helpers import get_pool_key
-from utils.serializers import serialize_sqlite_bool, serialize_utc_datetime
+from utils.serializers import serialize_utc_datetime
 from utils.timezone import KST, format_kst_timestamp, make_timezone_aware, utc_to_kst
 
 
@@ -32,18 +32,6 @@ class TestSerializers:
 
         assert result.tzinfo == timezone.utc
         assert result == aware_dt
-
-    @pytest.mark.unit
-    def test_serialize_sqlite_bool_true(self):
-        """Test converting SQLite integer to boolean (true)."""
-        assert serialize_sqlite_bool(1) is True
-        assert serialize_sqlite_bool(2) is True  # Any non-zero
-        assert serialize_sqlite_bool(100) is True
-
-    @pytest.mark.unit
-    def test_serialize_sqlite_bool_false(self):
-        """Test converting SQLite integer to boolean (false)."""
-        assert serialize_sqlite_bool(0) is False
 
 
 class TestHelpers:

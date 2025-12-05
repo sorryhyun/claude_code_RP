@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     All settings have sensible defaults and are validated on startup.
     """
 
+    # Database configuration (required)
+    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/chitchats"
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    db_pool_timeout: float = 30.0
+    db_pool_recycle: int = 1800
+
     # Authentication
     api_key_hash: Optional[str] = None
     jwt_secret: Optional[str] = None

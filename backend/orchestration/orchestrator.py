@@ -22,6 +22,7 @@ import schemas
 from domain.contexts import OrchestrationContext
 from sdk import AgentManager
 
+from .agent_ordering import is_transparent, separate_interrupt_agents, separate_priority_agents
 from .memory_brain import MemoryBrain
 from .response_generator import ResponseGenerator
 
@@ -83,33 +84,6 @@ class ChatOrchestrator:
         self.active_room_tasks.clear()
         self.last_user_message_time.clear()
         logger.info("✅ Orchestrator shutdown complete")
-
-    def _separate_priority_agents(self, agents: List) -> tuple[List, List]:
-        """
-        Separate agents into priority and regular groups based on priority_agent_names.
-
-        Args:
-            agents: List of agent objects
-
-        Returns:
-            Tuple of (priority_agents, regular_agents)
-        """
-        if not self.priority_agent_names:
-            return [], agents
-
-        priority_agents = []
-        regular_agents = []
-
-        for agent in agents:
-            if agent.name in self.priority_agent_names:
-                priority_agents.append(agent)
-            else:
-                regular_agents.append(agent)
-
-        # Sort priority agents by their order in priority_agent_names
-        priority_agents.sort(key=lambda a: self.priority_agent_names.index(a.name))
-
-        return priority_agents, regular_agents
 
     def get_chatting_agents(self, room_id: int, agent_manager: AgentManager) -> list[int]:
         """
@@ -235,21 +209,40 @@ class ChatOrchestrator:
         # Get all agents for the room (use cache for performance)
         all_agents = await crud.get_agents_cached(db, room_id)
 
+        # Filter by mentioned agents if specified (@ mention feature)
+        mentioned_agent_ids = message_data.get("mentioned_agent_ids")
+        if mentioned_agent_ids:
+            mentioned_set = set(mentioned_agent_ids)
+            room_agent_ids = {agent.id for agent in all_agents}
+            # Validate: only keep mentions that are actually in the room
+            valid_mentions = mentioned_set & room_agent_ids
+            if valid_mentions != mentioned_set:
+                invalid = mentioned_set - room_agent_ids
+                logger.warning(f"⚠️ Invalid @mentions (not in room): {invalid}")
+            if valid_mentions:
+                all_agents = [a for a in all_agents if a.id in valid_mentions]
+                logger.info(f"🎯 MENTION FILTER | Room: {room_id} | Only responding: {[a.name for a in all_agents]}")
+
         # Separate regular agents from critics
         agents = [agent for agent in all_agents if not agent.is_critic]
         critic_agents = [agent for agent in all_agents if agent.is_critic]
+
+        # Separate interrupt agents from regular agents
+        interrupt_agents, non_interrupt_agents = separate_interrupt_agents(agents)
 
         # Create orchestration context
         orch_context = OrchestrationContext(db=db, room_id=room_id, agent_manager=agent_manager)
 
         # Create a processing task for this room
         logger.info(
-            f"🚀 STARTING AGENT PROCESSING | Room: {room_id} | Agents: {len(agents)} | Critics: {len(critic_agents)}"
+            f"🚀 STARTING AGENT PROCESSING | Room: {room_id} | Agents: {len(non_interrupt_agents)} "
+            f"| Interrupt Agents: {len(interrupt_agents)} | Critics: {len(critic_agents)}"
         )
         processing_task = asyncio.create_task(
             self._process_agent_responses(
                 orch_context=orch_context,
-                agents=agents,
+                agents=non_interrupt_agents,
+                interrupt_agents=interrupt_agents,
                 critic_agents=critic_agents,
                 user_message_content=message_data["content"],
             )
@@ -276,12 +269,18 @@ class ChatOrchestrator:
                 del self.active_room_tasks[room_id]
 
     async def _process_agent_responses(
-        self, orch_context: OrchestrationContext, agents: List, critic_agents: List, user_message_content: str
+        self,
+        orch_context: OrchestrationContext,
+        agents: List,
+        interrupt_agents: List,
+        critic_agents: List,
+        user_message_content: str,
     ):
         """
         Internal method to process all agent responses.
         This can be cancelled if a new user message arrives.
         Critics are processed separately and their feedback is stored but not broadcast.
+        Interrupt agents respond after every non-transparent agent message.
         """
         logger.info(f"📝 _process_agent_responses called | Room: {orch_context.room_id}")
 
@@ -299,6 +298,7 @@ class ChatOrchestrator:
         total_messages = await self._initial_agent_responses(
             orch_context=orch_context,
             agents=agents,
+            interrupt_agents=interrupt_agents,
             user_message_content=user_message_content,
             total_messages=total_messages,
         )
@@ -317,9 +317,19 @@ class ChatOrchestrator:
                 logger.info(f"🛑 Room {orch_context.room_id} reached max interactions limit ({room.max_interactions})")
                 return
 
-        # Follow-up rounds: Agents respond to each other (only in multi-agent rooms)
-        if len(agents) > 1:
-            await self._follow_up_rounds(orch_context=orch_context, agents=agents, total_messages=total_messages)
+        # Skip follow-up rounds if all interrupt agents are transparent
+        all_interrupt_transparent = interrupt_agents and all(is_transparent(a) for a in interrupt_agents)
+        all_agents = agents + interrupt_agents
+
+        if all_interrupt_transparent:
+            logger.info("👻 All interrupt agents are transparent, skipping follow-up rounds")
+        elif len(all_agents) > 1:
+            await self._follow_up_rounds(
+                orch_context=orch_context,
+                agents=agents,
+                interrupt_agents=interrupt_agents,
+                total_messages=total_messages,
+            )
 
         # Process critic feedback (after conversation rounds complete)
         if critic_agents:
@@ -359,19 +369,25 @@ class ChatOrchestrator:
                 logger.info(f"✅ Critic {critic_agents[i].name} feedback stored")
 
     async def _initial_agent_responses(
-        self, orch_context: OrchestrationContext, agents: List, user_message_content: str, total_messages: int
+        self,
+        orch_context: OrchestrationContext,
+        agents: List,
+        interrupt_agents: List,
+        user_message_content: str,
+        total_messages: int,
     ) -> int:
         """
         Generate initial responses from all agents to the user message.
         Priority agents are processed SEQUENTIALLY (one at a time), giving them first chance.
         Regular agents are processed CONCURRENTLY after priority agents.
+        Interrupt agents respond after non-transparent agents.
         Agents can choose to skip by calling the 'skip' tool.
 
         Returns:
             Updated total_messages count
         """
         # Separate priority and regular agents
-        priority_agents, regular_agents = self._separate_priority_agents(agents)
+        priority_agents, regular_agents = separate_priority_agents(agents)
 
         # Log priority system status
         if priority_agents:
@@ -439,12 +455,78 @@ class ChatOrchestrator:
         total_messages += responses_count
         logger.info(f"📈 Responses count: {responses_count} | Total messages: {total_messages}")
 
+        # Run interrupt agents after regular agents (if any non-transparent agents responded)
+        if interrupt_agents and responses_count > 0:
+            # Check if any non-transparent agents responded
+            responded_agents = [
+                a for i, a in enumerate(priority_agents + regular_agents) if i < len(all_results) and all_results[i] is True
+            ]
+            non_transparent_responded = any(not is_transparent(a) for a in responded_agents)
+
+            if non_transparent_responded:
+                logger.info(f"🔔 Running {len(interrupt_agents)} interrupt agent(s) after initial responses...")
+                interrupt_results = await self._run_interrupt_agents(
+                    orch_context=orch_context,
+                    interrupt_agents=interrupt_agents,
+                    user_message_content=user_message_content,
+                )
+                interrupt_responses = sum(1 for r in interrupt_results if r is True)
+                total_messages += interrupt_responses
+                logger.info(f"📈 Interrupt responses: {interrupt_responses} | Total: {total_messages}")
+
         return total_messages
 
-    async def _follow_up_rounds(self, orch_context: OrchestrationContext, agents: List, total_messages: int):
+    async def _run_interrupt_agents(
+        self,
+        orch_context: OrchestrationContext,
+        interrupt_agents: List,
+        user_message_content: str = None,
+        exclude_agent_id: int = None,
+    ) -> List:
+        """
+        Run interrupt agents concurrently.
+
+        Args:
+            orch_context: Orchestration context
+            interrupt_agents: List of interrupt agents to run
+            user_message_content: User message (None for follow-up rounds)
+            exclude_agent_id: Agent ID to exclude (to prevent self-interruption)
+
+        Returns:
+            List of results (True for responded, False for skipped)
+        """
+        agents_to_run = [a for a in interrupt_agents if a.id != exclude_agent_id]
+
+        if not agents_to_run:
+            return []
+
+        tasks = [
+            self.response_generator.generate_response(
+                orch_context=orch_context,
+                agent=agent,
+                user_message_content=user_message_content,
+            )
+            for agent in agents_to_run
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Log results
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"❌ Interrupt agent {agents_to_run[i].name} error: {result}")
+            else:
+                logger.info(f"✓ Interrupt agent {agents_to_run[i].name} result: {result}")
+
+        return results
+
+    async def _follow_up_rounds(
+        self, orch_context: OrchestrationContext, agents: List, interrupt_agents: List, total_messages: int
+    ):
         """
         Orchestrate follow-up rounds where agents respond to each other SEQUENTIALLY.
         Priority agents are processed first (in priority order), then regular agents (shuffled).
+        Interrupt agents respond after each non-transparent agent.
         Each agent sees all previous responses before deciding whether to respond.
 
         Agents can choose to skip by calling the 'skip' tool.
@@ -478,7 +560,7 @@ class ChatOrchestrator:
                 remaining_interactions = None  # No limit
 
             # Separate priority and regular agents, then order them
-            priority_agents, regular_agents = self._separate_priority_agents(agents)
+            priority_agents, regular_agents = separate_priority_agents(agents)
 
             # Shuffle only the regular agents for natural conversation flow
             shuffled_regular = list(regular_agents)
@@ -519,6 +601,20 @@ class ChatOrchestrator:
                         # Decrement remaining interactions counter
                         if remaining_interactions is not None:
                             remaining_interactions -= 1
+
+                        # Run interrupt agents after non-transparent agents respond
+                        if interrupt_agents and not is_transparent(agent):
+                            logger.info(f"🔔 Running interrupt agents after {agent.name}...")
+                            interrupt_results = await self._run_interrupt_agents(
+                                orch_context=orch_context,
+                                interrupt_agents=interrupt_agents,
+                                user_message_content=None,
+                                exclude_agent_id=agent.id,  # Prevent self-interruption
+                            )
+                            interrupt_responses = sum(1 for r in interrupt_results if r is True)
+                            total_messages += interrupt_responses
+                            if remaining_interactions is not None:
+                                remaining_interactions -= interrupt_responses
 
                 except Exception as e:
                     # Log error but continue with other agents
