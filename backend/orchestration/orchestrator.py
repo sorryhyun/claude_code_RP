@@ -3,16 +3,16 @@ Chat orchestrator for managing multi-agent conversations.
 
 This module handles the logic for multi-round conversations between agents,
 including context building, response generation, and message broadcasting.
+
+Uses a tape-based scheduling system for predictable turn management.
 """
 
 import asyncio
 import logging
-import random
 import time
 from typing import List
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 logger = logging.getLogger("ChatOrchestrator")
 
@@ -22,9 +22,10 @@ import schemas
 from domain.contexts import OrchestrationContext
 from sdk import AgentManager
 
-from .agent_ordering import is_transparent, separate_interrupt_agents, separate_priority_agents
+from .agent_ordering import is_transparent, separate_interrupt_agents
 from .memory_brain import MemoryBrain
 from .response_generator import ResponseGenerator
+from .tape import TapeExecutor, TapeGenerator
 
 # Multi-round conversation settings
 MAX_FOLLOW_UP_ROUNDS = 5  # Number of follow-up rounds after initial responses
@@ -277,59 +278,75 @@ class ChatOrchestrator:
         user_message_content: str,
     ):
         """
-        Internal method to process all agent responses.
+        Internal method to process all agent responses using tape-based scheduling.
         This can be cancelled if a new user message arrives.
         Critics are processed separately and their feedback is stored but not broadcast.
         Interrupt agents respond after every non-transparent agent message.
         """
-        logger.info(f"📝 _process_agent_responses called | Room: {orch_context.room_id}")
+        logger.info(f"_process_agent_responses called | Room: {orch_context.room_id}")
 
         # Check if room is paused
         room = await crud.get_room_cached(orch_context.db, orch_context.room_id)
         if room and room.is_paused:
-            logger.info(f"⏸️  Room {orch_context.room_id} is paused. Skipping agent responses.")
+            logger.info(f"Room {orch_context.room_id} is paused. Skipping agent responses.")
             return
 
-        logger.info(f"▶️  Room {orch_context.room_id} is NOT paused. Proceeding with agents...")
-        total_messages = 0
+        logger.info(f"Room {orch_context.room_id} is NOT paused. Proceeding with agents...")
 
-        # Round 1: All agents respond to user message
-        logger.info(f"🔄 Starting initial agent responses for {len(agents)} agent(s)...")
-        total_messages = await self._initial_agent_responses(
-            orch_context=orch_context,
-            agents=agents,
-            interrupt_agents=interrupt_agents,
-            user_message_content=user_message_content,
-            total_messages=total_messages,
+        # Create tape generator and executor
+        generator = TapeGenerator(agents, interrupt_agents)
+        agents_by_id = {a.id: a for a in agents + interrupt_agents}
+        executor = TapeExecutor(
+            response_generator=self.response_generator,
+            agents_by_id=agents_by_id,
+            max_total_messages=self.max_total_messages,
         )
-        logger.info(f"✅ Initial agent responses complete. Total messages: {total_messages}")
 
-        # Refetch room state to check for updates (pause/interaction limit changes)
-        room = await crud.get_room_cached(orch_context.db, orch_context.room_id)
-        if room and room.is_paused:
-            logger.info(f"⏸️  Room {orch_context.room_id} was paused. Stopping agent responses.")
+        # Generate and execute initial round tape
+        logger.info(f"Starting initial agent responses for {len(agents)} agent(s)...")
+        initial_tape = generator.generate_initial_round()
+        result = await executor.execute(
+            tape=initial_tape,
+            orch_context=orch_context,
+            user_message_content=user_message_content,
+        )
+        total_messages = result.total_responses
+        logger.info(f"Initial agent responses complete. Total messages: {total_messages}")
+
+        # Check stop conditions from initial round
+        if result.was_paused or result.reached_limit or result.was_interrupted:
+            logger.info(f"Stopping after initial round | paused={result.was_paused} limit={result.reached_limit}")
+            if critic_agents:
+                await self._process_critic_feedback(orch_context, critic_agents, user_message_content)
             return
-
-        # Check if we've hit the interaction limit after initial responses
-        if room and room.max_interactions is not None:
-            current_agent_messages = await self._count_agent_messages(orch_context.db, orch_context.room_id)
-            if current_agent_messages >= room.max_interactions:
-                logger.info(f"🛑 Room {orch_context.room_id} reached max interactions limit ({room.max_interactions})")
-                return
 
         # Skip follow-up rounds if all interrupt agents are transparent
         all_interrupt_transparent = interrupt_agents and all(is_transparent(a) for a in interrupt_agents)
         all_agents = agents + interrupt_agents
 
         if all_interrupt_transparent:
-            logger.info("👻 All interrupt agents are transparent, skipping follow-up rounds")
+            logger.info("All interrupt agents are transparent, skipping follow-up rounds")
         elif len(all_agents) > 1:
-            await self._follow_up_rounds(
-                orch_context=orch_context,
-                agents=agents,
-                interrupt_agents=interrupt_agents,
-                total_messages=total_messages,
-            )
+            # Execute follow-up rounds using tape system
+            for round_num in range(self.max_follow_up_rounds):
+                follow_up_tape = generator.generate_follow_up_round(round_num)
+                result = await executor.execute(
+                    tape=follow_up_tape,
+                    orch_context=orch_context,
+                    user_message_content=None,  # No user message for follow-ups
+                    current_total=total_messages,
+                )
+                total_messages += result.total_responses
+
+                # Check stop conditions
+                if result.was_paused or result.reached_limit or result.was_interrupted:
+                    logger.info(f"Stopping follow-up round {round_num + 1} | paused={result.was_paused}")
+                    break
+
+                # If all agents skipped, conversation is over
+                if result.all_skipped:
+                    logger.info(f"All agents skipped in round {round_num + 1}, ending conversation")
+                    break
 
         # Process critic feedback (after conversation rounds complete)
         if critic_agents:
@@ -368,266 +385,11 @@ class ChatOrchestrator:
             else:
                 logger.info(f"✅ Critic {critic_agents[i].name} feedback stored")
 
-    async def _initial_agent_responses(
-        self,
-        orch_context: OrchestrationContext,
-        agents: List,
-        interrupt_agents: List,
-        user_message_content: str,
-        total_messages: int,
-    ) -> int:
-        """
-        Generate initial responses from all agents to the user message.
-        Priority agents are processed SEQUENTIALLY (one at a time), giving them first chance.
-        Regular agents are processed CONCURRENTLY after priority agents.
-        Interrupt agents respond after non-transparent agents.
-        Agents can choose to skip by calling the 'skip' tool.
-
-        Returns:
-            Updated total_messages count
-        """
-        # Separate priority and regular agents
-        priority_agents, regular_agents = separate_priority_agents(agents)
-
-        # Log priority system status
-        if priority_agents:
-            logger.info(
-                f"🎯 Priority agents ({len(priority_agents)}): {[a.name for a in priority_agents]} | "
-                f"Regular agents ({len(regular_agents)}): {[a.name for a in regular_agents]}"
-            )
-        else:
-            logger.info(f"👥 All agents ({len(agents)}) will respond concurrently (no priority set)")
-
-        all_results = []
-
-        # Process priority agents SEQUENTIALLY (one at a time)
-        if priority_agents:
-            logger.info(f"⭐ Processing {len(priority_agents)} priority agent(s) sequentially...")
-            for i, agent in enumerate(priority_agents):
-                logger.info(f"🎯 Priority agent {i + 1}/{len(priority_agents)}: {agent.name}")
-                try:
-                    result = await self.response_generator.generate_response(
-                        orch_context=orch_context, agent=agent, user_message_content=user_message_content
-                    )
-                    all_results.append(result)
-                    logger.info(f"✓ Priority agent {agent.name} completed: {result}")
-                except Exception as e:
-                    logger.error(f"❌ Priority agent {agent.name} error: {e}")
-                    all_results.append(e)
-
-        # Check if room was paused during priority agent processing
-        room = await crud.get_room_cached(orch_context.db, orch_context.room_id)
-        if room and room.is_paused:
-            logger.info(f"⏸️  Room {orch_context.room_id} was paused during priority agents. Stopping.")
-            responses_count = sum(1 for result in all_results if result is True)
-            return total_messages + responses_count
-
-        # Process regular agents CONCURRENTLY (all at once)
-        if regular_agents:
-            logger.info(f"👥 Processing {len(regular_agents)} regular agent(s) concurrently...")
-            tasks = [
-                self.response_generator.generate_response(
-                    orch_context=orch_context, agent=agent, user_message_content=user_message_content
-                )
-                for agent in regular_agents
-            ]
-
-            # Wait for all regular agents to complete
-            logger.info(f"⏳ Waiting for {len(tasks)} regular agent task(s) to complete...")
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            all_results.extend(results)
-
-            # Log regular agent results
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"❌ Regular agent {i} error: {result}")
-                else:
-                    logger.info(f"✓ Regular agent {i} result: {result}")
-
-        # Check if room was paused during agent processing
-        room = await crud.get_room_cached(orch_context.db, orch_context.room_id)
-        if room and room.is_paused:
-            logger.info(f"⏸️  Room {orch_context.room_id} was paused during agent responses. Stopping.")
-            return total_messages  # Return without counting any responses
-
-        # Count how many agents responded (didn't skip)
-        responses_count = sum(1 for result in all_results if result is True)
-        total_messages += responses_count
-        logger.info(f"📈 Responses count: {responses_count} | Total messages: {total_messages}")
-
-        # Run interrupt agents after regular agents (if any non-transparent agents responded)
-        if interrupt_agents and responses_count > 0:
-            # Check if any non-transparent agents responded
-            responded_agents = [
-                a for i, a in enumerate(priority_agents + regular_agents) if i < len(all_results) and all_results[i] is True
-            ]
-            non_transparent_responded = any(not is_transparent(a) for a in responded_agents)
-
-            if non_transparent_responded:
-                logger.info(f"🔔 Running {len(interrupt_agents)} interrupt agent(s) after initial responses...")
-                interrupt_results = await self._run_interrupt_agents(
-                    orch_context=orch_context,
-                    interrupt_agents=interrupt_agents,
-                    user_message_content=user_message_content,
-                )
-                interrupt_responses = sum(1 for r in interrupt_results if r is True)
-                total_messages += interrupt_responses
-                logger.info(f"📈 Interrupt responses: {interrupt_responses} | Total: {total_messages}")
-
-        return total_messages
-
-    async def _run_interrupt_agents(
-        self,
-        orch_context: OrchestrationContext,
-        interrupt_agents: List,
-        user_message_content: str = None,
-        exclude_agent_id: int = None,
-    ) -> List:
-        """
-        Run interrupt agents concurrently.
-
-        Args:
-            orch_context: Orchestration context
-            interrupt_agents: List of interrupt agents to run
-            user_message_content: User message (None for follow-up rounds)
-            exclude_agent_id: Agent ID to exclude (to prevent self-interruption)
-
-        Returns:
-            List of results (True for responded, False for skipped)
-        """
-        agents_to_run = [a for a in interrupt_agents if a.id != exclude_agent_id]
-
-        if not agents_to_run:
-            return []
-
-        tasks = [
-            self.response_generator.generate_response(
-                orch_context=orch_context,
-                agent=agent,
-                user_message_content=user_message_content,
-            )
-            for agent in agents_to_run
-        ]
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Log results
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"❌ Interrupt agent {agents_to_run[i].name} error: {result}")
-            else:
-                logger.info(f"✓ Interrupt agent {agents_to_run[i].name} result: {result}")
-
-        return results
-
-    async def _follow_up_rounds(
-        self, orch_context: OrchestrationContext, agents: List, interrupt_agents: List, total_messages: int
-    ):
-        """
-        Orchestrate follow-up rounds where agents respond to each other SEQUENTIALLY.
-        Priority agents are processed first (in priority order), then regular agents (shuffled).
-        Interrupt agents respond after each non-transparent agent.
-        Each agent sees all previous responses before deciding whether to respond.
-
-        Agents can choose to skip by calling the 'skip' tool.
-
-        Performance optimization: Room state and message counts are cached per round
-        instead of being refetched before each agent response, reducing database
-        queries by ~80%.
-        """
-        for round_num in range(self.max_follow_up_rounds):
-            if total_messages >= self.max_total_messages:
-                break
-
-            # Fetch room state ONCE at the start of each round (not before each agent)
-            room = await crud.get_room_cached(orch_context.db, orch_context.room_id)
-            if room and room.is_paused:
-                logger.info(f"⏸️  Room {orch_context.room_id} was paused. Stopping follow-up rounds.")
-                break
-
-            # Check interaction limit ONCE at the start of each round
-            # Then maintain a local counter to avoid repeated COUNT queries
-            if room and room.max_interactions is not None:
-                current_agent_messages = await self._count_agent_messages(orch_context.db, orch_context.room_id)
-                if current_agent_messages >= room.max_interactions:
-                    logger.info(
-                        f"🛑 Room {orch_context.room_id} reached max interactions limit ({room.max_interactions})"
-                    )
-                    break
-                # Track remaining interactions for this round
-                remaining_interactions = room.max_interactions - current_agent_messages
-            else:
-                remaining_interactions = None  # No limit
-
-            # Separate priority and regular agents, then order them
-            priority_agents, regular_agents = separate_priority_agents(agents)
-
-            # Shuffle only the regular agents for natural conversation flow
-            shuffled_regular = list(regular_agents)
-            random.shuffle(shuffled_regular)
-
-            # Combine: priority agents first (in priority order), then shuffled regular agents
-            ordered_agents = priority_agents + shuffled_regular
-
-            if priority_agents:
-                logger.info(
-                    f"🔄 Follow-up round {round_num + 1}: Priority agents: {[a.name for a in priority_agents]}, "
-                    f"then shuffled: {[a.name for a in shuffled_regular]}"
-                )
-
-            responses_count = 0
-
-            # Process agents sequentially (one at a time)
-            for agent in ordered_agents:
-                if total_messages >= self.max_total_messages:
-                    break
-
-                # Check local counter instead of refetching room state for each agent
-                # This reduces database queries from N per agent to 1 per round
-                if remaining_interactions is not None and remaining_interactions <= 0:
-                    logger.info(f"🛑 Room {orch_context.room_id} reached max interactions limit (local count)")
-                    break
-
-                try:
-                    responded = await self.response_generator.generate_response(
-                        orch_context=orch_context,
-                        agent=agent,
-                        user_message_content=None,  # None means follow-up round
-                    )
-
-                    if responded:
-                        responses_count += 1
-                        total_messages += 1
-                        # Decrement remaining interactions counter
-                        if remaining_interactions is not None:
-                            remaining_interactions -= 1
-
-                        # Run interrupt agents after non-transparent agents respond
-                        if interrupt_agents and not is_transparent(agent):
-                            logger.info(f"🔔 Running interrupt agents after {agent.name}...")
-                            interrupt_results = await self._run_interrupt_agents(
-                                orch_context=orch_context,
-                                interrupt_agents=interrupt_agents,
-                                user_message_content=None,
-                                exclude_agent_id=agent.id,  # Prevent self-interruption
-                            )
-                            interrupt_responses = sum(1 for r in interrupt_results if r is True)
-                            total_messages += interrupt_responses
-                            if remaining_interactions is not None:
-                                remaining_interactions -= interrupt_responses
-
-                except Exception as e:
-                    # Log error but continue with other agents
-                    logger.error(f"Error in agent {agent.name} response: {e}")
-                    continue
-
-            # If no agents responded this round, end the conversation
-            if responses_count == 0:
-                break
 
     async def _count_agent_messages(self, db: AsyncSession, room_id: int) -> int:
         """Count the number of agent messages (role='assistant') in a room."""
         from sqlalchemy import func
+        from sqlalchemy.future import select
 
         result = await db.execute(
             select(func.count(models.Message.id)).where(

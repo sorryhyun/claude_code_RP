@@ -3,11 +3,14 @@ Chat orchestration module for multi-agent conversations.
 
 This module provides functionality for orchestrating multi-agent conversations,
 building conversation context, and handling message broadcasting.
+
+Uses tape-based scheduling for predictable turn management.
 """
 
 from .context import build_conversation_context
 from .handlers import broadcast_typing_indicator, save_and_broadcast_agent_message
 from .orchestrator import MAX_FOLLOW_UP_ROUNDS, MAX_TOTAL_MESSAGES, ChatOrchestrator
+from .tape import CellType, ExecutionResult, TapeExecutor, TapeGenerator, TurnCell, TurnTape
 
 __all__ = [
     "ChatOrchestrator",
@@ -16,4 +19,11 @@ __all__ = [
     "build_conversation_context",
     "broadcast_typing_indicator",
     "save_and_broadcast_agent_message",
+    # Tape-based scheduling
+    "TapeGenerator",
+    "TapeExecutor",
+    "TurnTape",
+    "TurnCell",
+    "CellType",
+    "ExecutionResult",
 ]

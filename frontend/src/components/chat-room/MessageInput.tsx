@@ -1,4 +1,4 @@
-import { useState, FormEvent, KeyboardEvent, DragEvent, useRef, useEffect } from 'react';
+import { useState, FormEvent, KeyboardEvent, DragEvent, ClipboardEvent, useRef, useEffect } from 'react';
 import { Send, User, Sparkles, UserCircle, ImageIcon } from 'lucide-react';
 import type { ParticipantType, ImageAttachment } from '../../types';
 import { cn } from '@/lib/utils';
@@ -30,6 +30,7 @@ export const MessageInput = ({ isConnected, onSendMessage }: MessageInputProps) 
   // Supported image types
   const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+  const WEBP_QUALITY = 0.85; // WebP conversion quality
 
   // Cleanup: revoke object URL when component unmounts or imagePreview changes
   useEffect(() => {
@@ -40,7 +41,49 @@ export const MessageInput = ({ isConnected, onSendMessage }: MessageInputProps) 
     };
   }, [imagePreview]);
 
-  // Process a file into base64
+  // Convert image file to WebP using Canvas API
+  const convertToWebP = (file: File): Promise<{ base64: string; blob: Blob }> => {
+    return new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Failed to convert image to WebP'));
+              return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              const base64 = result.split(',')[1];
+              resolve({ base64, blob });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/webp',
+          WEBP_QUALITY
+        );
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  // Process a file into base64 (converts to WebP for optimization)
   const processImageFile = async (file: File): Promise<void> => {
     if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
       alert('Please upload a PNG, JPEG, GIF, or WebP image.');
@@ -53,31 +96,17 @@ export const MessageInput = ({ isConnected, onSendMessage }: MessageInputProps) 
     }
 
     try {
-      const base64 = await fileToBase64(file);
+      // Convert to WebP for optimization
+      const { base64, blob } = await convertToWebP(file);
       setImageAttachment({
         data: base64,
-        media_type: file.type,
+        media_type: 'image/webp',
       });
-      setImagePreview(URL.createObjectURL(file));
+      setImagePreview(URL.createObjectURL(blob));
     } catch (error) {
       console.error('Error processing image:', error);
       alert('Failed to process image. Please try again.');
     }
-  };
-
-  // Convert file to base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        // Remove the data URL prefix (e.g., "data:image/png;base64,")
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
   };
 
   // Handle drag events
@@ -105,6 +134,24 @@ export const MessageInput = ({ isConnected, onSendMessage }: MessageInputProps) 
         await processImageFile(file);
       }
     }
+  };
+
+  // Handle paste from clipboard (Ctrl+V / Cmd+V)
+  const handlePaste = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault(); // Prevent default paste behavior for images
+        const file = item.getAsFile();
+        if (file) {
+          await processImageFile(file);
+        }
+        return; // Only process first image
+      }
+    }
+    // If no image found, let default paste behavior handle text
   };
 
   // Handle file input change
@@ -312,7 +359,7 @@ export const MessageInput = ({ isConnected, onSendMessage }: MessageInputProps) 
             'flex-shrink-0 w-10 h-10 sm:w-11 sm:h-11 rounded-full',
             imageAttachment ? 'text-primary bg-primary/10' : 'text-muted-foreground'
           )}
-          title="Attach image (or drag & drop)"
+          title="Attach image (drag & drop or Ctrl+V)"
           disabled={!isConnected}
         >
           <ImageIcon className="w-5 h-5" />
@@ -324,7 +371,8 @@ export const MessageInput = ({ isConnected, onSendMessage }: MessageInputProps) 
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Message as ${getPersonaLabel()}...`}
+            onPaste={handlePaste}
+            placeholder={`Ctrl + Enter to send message...`}
             className={cn(
               'min-h-[44px] max-h-[200px] resize-none border-0 bg-transparent',
               'focus-visible:ring-0 focus-visible:ring-offset-0',

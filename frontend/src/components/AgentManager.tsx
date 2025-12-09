@@ -60,7 +60,6 @@ export const AgentManager = ({ roomId }: AgentManagerProps) => {
 
     // Optimistic update: add agent to roomAgents immediately
     setRoomAgents(prev => [...prev, agentToAdd]);
-    setShowAddAgent(false);
 
     try {
       await api.addAgentToRoom(roomId, agentId);

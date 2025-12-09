@@ -224,27 +224,16 @@ class AgentManager:
             memory_entries = []  # Track memory entries from memorize tool calls
 
             # Build the message with conversation history if provided
-            # If there's an image attachment, create a content list with both image and text
+            # If there's an image attachment, embed as base64 data URI in the string
             if context.image_data:
-                # For the Claude Agent SDK, we need to send the message with image as a structured content
-                # The SDK should support the Messages API format with content blocks
                 text_content = context.user_message
                 if context.conversation_history:
                     text_content = f"{context.conversation_history}\n\n{context.user_message}"
 
-                # Create message content with image block followed by text
-                # The Claude Agent SDK query() accepts either a string or a list of content blocks
-                message_to_send = [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": context.image_data.media_type,
-                            "data": context.image_data.data,
-                        },
-                    },
-                    {"type": "text", "text": text_content},
-                ]
+                # Embed image as base64 data URI directly in the message string
+                # Claude Agent SDK handles this format natively
+                data_uri = f"data:{context.image_data.media_type};base64,{context.image_data.data}"
+                message_to_send = f"[Image: {data_uri}]\n\n{text_content}"
             else:
                 message_to_send = context.user_message
                 if context.conversation_history:
@@ -289,70 +278,90 @@ class AgentManager:
                     raise Exception(f"Timeout sending message to agent (>{_settings.agent_query_timeout}s)")
 
                 # Receive and stream the response
-                async for message in client.receive_response():
-                    # Parse the message using StreamParser
-                    parsed = self.stream_parser.parse_message(message, response_text, thinking_text)
+                response_stream = client.receive_response()
+                # Handle case where client was disconnected and returns a list/non-async-iterable
+                # instead of async iterator. Use hasattr check for robustness (covers list-like objects)
+                if not hasattr(response_stream, "__aiter__"):
+                    logger.warning(
+                        f"⚠️ Client disconnected, receive_response returned non-async-iterable "
+                        f"(type: {type(response_stream).__name__}) | Task: {task_id}"
+                    )
+                    # Process any messages in the iterable (usually empty when disconnected)
+                    for message in response_stream or []:
+                        parsed = self.stream_parser.parse_message(message, response_text, thinking_text)
+                        response_text = parsed.response_text
+                        thinking_text = parsed.thinking_text
+                        if parsed.session_id:
+                            new_session_id = parsed.session_id
+                        if parsed.skip_used:
+                            skip_tool_called = True
+                        memory_entries.extend(parsed.memory_entries)
+                    # Continue to response completion (skip the async for block)
+                else:
+                    async for message in response_stream:
+                        # Parse the message using StreamParser
+                        parsed = self.stream_parser.parse_message(message, response_text, thinking_text)
 
-                    # Calculate deltas for yielding
-                    content_delta = parsed.response_text[len(response_text) :]
-                    thinking_delta = parsed.thinking_text[len(thinking_text) :]
+                        # Calculate deltas for yielding
+                        content_delta = parsed.response_text[len(response_text) :]
+                        thinking_delta = parsed.thinking_text[len(thinking_text) :]
 
-                    # Update session if found
-                    if parsed.session_id:
-                        new_session_id = parsed.session_id
+                        # Update session if found
+                        if parsed.session_id:
+                            new_session_id = parsed.session_id
 
-                    # Update skip flag
-                    if parsed.skip_used:
-                        skip_tool_called = True
+                        # Update skip flag
+                        if parsed.skip_used:
+                            skip_tool_called = True
 
-                    # Collect memory entries
-                    memory_entries.extend(parsed.memory_entries)
+                        # Collect memory entries
+                        memory_entries.extend(parsed.memory_entries)
 
-                    # Update accumulated text
-                    response_text = parsed.response_text
-                    thinking_text = parsed.thinking_text
+                        # Update accumulated text
+                        response_text = parsed.response_text
+                        thinking_text = parsed.thinking_text
 
-                    # Yield delta events for content and thinking
-                    if content_delta:
-                        logger.info(f"🔄 YIELDING content delta | Length: {len(content_delta)}")
-                        # Update streaming state for polling
-                        if task_id in self.streaming_state:
-                            self.streaming_state[task_id]["content"] = response_text
-                        yield {
-                            "type": "content_delta",
-                            "delta": content_delta,
-                            "temp_id": temp_id,
-                        }
+                        # Yield delta events for content and thinking
+                        if content_delta:
+                            logger.info(f"🔄 YIELDING content delta | Length: {len(content_delta)}")
+                            # Update streaming state for polling
+                            if task_id in self.streaming_state:
+                                self.streaming_state[task_id]["content"] = response_text
+                            yield {
+                                "type": "content_delta",
+                                "delta": content_delta,
+                                "temp_id": temp_id,
+                            }
 
-                    if thinking_delta:
-                        logger.info(f"🔄 YIELDING thinking delta | Length: {len(thinking_delta)}")
-                        # Update streaming state for polling
-                        if task_id in self.streaming_state:
-                            self.streaming_state[task_id]["thinking"] = thinking_text
-                        yield {
-                            "type": "thinking_delta",
-                            "delta": thinking_delta,
-                            "temp_id": temp_id,
-                        }
+                        if thinking_delta:
+                            logger.info(f"🔄 YIELDING thinking delta | Length: {len(thinking_delta)}")
+                            # Update streaming state for polling
+                            if task_id in self.streaming_state:
+                                self.streaming_state[task_id]["thinking"] = thinking_text
+                            yield {
+                                "type": "thinking_delta",
+                                "delta": thinking_delta,
+                                "temp_id": temp_id,
+                            }
 
-                    # Debug log each message received from the SDK
-                    # Configuration loaded from debug.yaml
-                    if DEBUG_MODE:
-                        # Get streaming config from debug.yaml
-                        config = get_debug_config()
-                        streaming_config = config.get("debug", {}).get("logging", {}).get("streaming", {})
+                        # Debug log each message received from the SDK
+                        # Configuration loaded from debug.yaml
+                        if DEBUG_MODE:
+                            # Get streaming config from debug.yaml
+                            config = get_debug_config()
+                            streaming_config = config.get("debug", {}).get("logging", {}).get("streaming", {})
 
-                        if streaming_config.get("enabled", True):
-                            # Skip system init messages if configured
-                            is_system_init = (
-                                message.__class__.__name__ == "SystemMessage"
-                                and hasattr(message, "subtype")
-                                and message.subtype == "init"
-                            )
-                            skip_system_init = streaming_config.get("skip_system_init", True)
+                            if streaming_config.get("enabled", True):
+                                # Skip system init messages if configured
+                                is_system_init = (
+                                    message.__class__.__name__ == "SystemMessage"
+                                    and hasattr(message, "subtype")
+                                    and message.subtype == "init"
+                                )
+                                skip_system_init = streaming_config.get("skip_system_init", True)
 
-                            if not (is_system_init and skip_system_init):
-                                logger.debug(f"📨 Received message:\n{format_message_for_debug(message)}")
+                                if not (is_system_init and skip_system_init):
+                                    logger.debug(f"📨 Received message:\n{format_message_for_debug(message)}")
             finally:
                 # Always unregister the client when done (success or failure)
                 self.active_clients.pop(task_id, None)

@@ -3,6 +3,8 @@ Background scheduler for autonomous agent chat rounds.
 
 This module runs periodic tasks to process agent conversations in active rooms,
 enabling background chatroom interactions when users are not actively viewing.
+
+Uses tape-based scheduling for predictable turn management.
 """
 
 import asyncio
@@ -14,6 +16,8 @@ import crud
 import models
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from orchestration import ChatOrchestrator
+from orchestration.agent_ordering import separate_interrupt_agents
+from orchestration.tape import TapeExecutor, TapeGenerator
 from sdk import AgentManager
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -219,12 +223,14 @@ class BackgroundScheduler:
 
     async def _process_room_autonomous_round(self, db: AsyncSession, room: models.Room):
         """
-        Process one autonomous round for a room.
+        Process one autonomous round for a room using tape-based scheduling.
 
         This simulates agent interactions without a user message trigger.
         Agents will decide whether to respond based on the conversation context.
         """
-        logger.info(f"🤖 Processing autonomous round | Room: {room.id} ({room.name})")
+        # Room may be detached from previous session, merge to re-attach
+        room = await db.merge(room, load=False)
+        logger.info(f"Processing autonomous round | Room: {room.id} ({room.name})")
 
         # Clean up completed tasks before checking
         self._cleanup_completed_tasks()
@@ -240,7 +246,10 @@ class BackgroundScheduler:
                 del self.chat_orchestrator.active_room_tasks[room.id]
 
         # Get all agents (use cache for performance)
-        all_agents = await crud.get_agents_cached(db, room.id)
+        # Note: Cached agents may be detached from session, so we merge them
+        # to re-attach to current session and allow attribute access
+        cached_agents = await crud.get_agents_cached(db, room.id)
+        all_agents = [await db.merge(agent, load=False) for agent in cached_agents]
         agents = [agent for agent in all_agents if not agent.is_critic]
 
         if len(agents) < 2:
@@ -254,22 +263,39 @@ class BackgroundScheduler:
                 logger.debug(f"Room {room.id} reached max interactions ({room.max_interactions})")
                 return
 
-        # Run one follow-up round
-        # Polling architecture doesn't use real-time broadcasting
+        # Create orchestration context
         from domain.contexts import OrchestrationContext
 
         orch_context = OrchestrationContext(db=db, room_id=room.id, agent_manager=self.agent_manager)
 
-        # Use the existing _follow_up_rounds logic with max 1 round
-        original_max = self.chat_orchestrator.max_follow_up_rounds
-        self.chat_orchestrator.max_follow_up_rounds = 1  # Only one round at a time
+        # Separate interrupt agents from regular agents
+        interrupt_agents, non_interrupt_agents = separate_interrupt_agents(agents)
 
-        try:
-            await self.chat_orchestrator._follow_up_rounds(orch_context=orch_context, agents=agents, total_messages=0)
-            logger.info(f"✅ Autonomous round complete | Room: {room.id}")
-        finally:
-            # Restore original setting
-            self.chat_orchestrator.max_follow_up_rounds = original_max
+        # Create tape generator and executor
+        generator = TapeGenerator(non_interrupt_agents, interrupt_agents)
+        agents_by_id = {a.id: a for a in agents}
+        executor = TapeExecutor(
+            response_generator=self.chat_orchestrator.response_generator,
+            agents_by_id=agents_by_id,
+            max_total_messages=self.chat_orchestrator.max_total_messages,
+        )
+
+        # Generate and execute one follow-up round tape
+        tape = generator.generate_follow_up_round(round_num=0)
+        result = await executor.execute(
+            tape=tape,
+            orch_context=orch_context,
+            user_message_content=None,  # No user message for autonomous rounds
+        )
+
+        logger.info(
+            f"Autonomous round complete | Room: {room.id} | "
+            f"Responses: {result.total_responses} | Skips: {result.total_skips}"
+        )
+
+        # Mark room as finished if all agents skipped
+        if result.all_skipped:
+            logger.info(f"All agents skipped in room {room.id}, conversation may be complete")
 
     async def _cleanup_cache(self):
         """

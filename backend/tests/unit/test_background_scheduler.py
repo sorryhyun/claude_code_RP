@@ -225,12 +225,12 @@ class TestProcessRoomAutonomousRound:
 
     @pytest.mark.asyncio
     async def test_process_room_autonomous_round_basic(self):
-        """Test processing autonomous round."""
+        """Test processing autonomous round using tape-based scheduling."""
         mock_orchestrator = Mock()
         mock_orchestrator.active_room_tasks = {}
-        mock_orchestrator.max_follow_up_rounds = 5
+        mock_orchestrator.max_total_messages = 30
         mock_orchestrator._count_agent_messages = AsyncMock(return_value=0)
-        mock_orchestrator._follow_up_rounds = AsyncMock()
+        mock_orchestrator.response_generator = AsyncMock()
 
         mock_agent_manager = Mock()
         mock_get_db = Mock()
@@ -239,15 +239,49 @@ class TestProcessRoomAutonomousRound:
 
         mock_db = AsyncMock()
         mock_room = Mock(id=1, name="Test Room", max_interactions=None)
-        mock_agent1 = Mock(is_critic=False)
-        mock_agent2 = Mock(is_critic=False)
 
-        with patch("background_scheduler.crud.get_agents", return_value=[mock_agent1, mock_agent2]):
+        # Create mock agents with required attributes for tape system
+        mock_agent1 = Mock(id=1, is_critic=False, priority=0, interrupt_every_turn=False, transparent=False, name="Agent1")
+        mock_agent2 = Mock(id=2, is_critic=False, priority=0, interrupt_every_turn=False, transparent=False, name="Agent2")
+
+        # Mock db.merge to return the objects themselves (simulating re-attachment to session)
+        async def mock_merge(obj, load=True):
+            return obj
+
+        mock_db.merge = mock_merge
+
+        # Mock execution result
+        mock_result = Mock(
+            total_responses=2,
+            total_skips=0,
+            was_paused=False,
+            was_interrupted=False,
+            reached_limit=False,
+            all_skipped=False,
+        )
+
+        with (
+            patch("background_scheduler.crud.get_agents_cached", return_value=[mock_agent1, mock_agent2]),
+            patch("background_scheduler.TapeGenerator") as mock_gen_class,
+            patch("background_scheduler.TapeExecutor") as mock_exec_class,
+        ):
+            mock_generator = Mock()
+            mock_generator.generate_follow_up_round.return_value = Mock()
+            mock_gen_class.return_value = mock_generator
+
+            mock_executor = AsyncMock()
+            mock_executor.execute.return_value = mock_result
+            mock_exec_class.return_value = mock_executor
+
             await scheduler._process_room_autonomous_round(mock_db, mock_room)
 
-            # Should call follow-up rounds with limit of 1
-            mock_orchestrator._follow_up_rounds.assert_awaited_once()
-            assert mock_orchestrator.max_follow_up_rounds == 5  # Restored
+            # Should create TapeGenerator and TapeExecutor
+            mock_gen_class.assert_called_once()
+            mock_exec_class.assert_called_once()
+
+            # Should generate and execute one follow-up round
+            mock_generator.generate_follow_up_round.assert_called_once_with(round_num=0)
+            mock_executor.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_process_room_skips_if_already_processing(self):
@@ -264,7 +298,13 @@ class TestProcessRoomAutonomousRound:
         scheduler = BackgroundScheduler(mock_orchestrator, mock_agent_manager, mock_get_db)
 
         mock_db = AsyncMock()
-        mock_room = Mock(id=1)
+        mock_room = Mock(id=1, name="Test Room")
+
+        # Mock db.merge to return the room with the correct id
+        async def mock_merge(obj, load=True):
+            return obj
+
+        mock_db.merge = mock_merge
 
         await scheduler._process_room_autonomous_round(mock_db, mock_room)
 
@@ -288,6 +328,12 @@ class TestProcessRoomAutonomousRound:
         mock_room = Mock(id=1, name="Test Room", max_interactions=None)  # Set all required attributes
         mock_agent = Mock(is_critic=False)
 
+        # Mock db.merge to return the objects themselves
+        async def mock_merge(obj, load=True):
+            return obj
+
+        mock_db.merge = mock_merge
+
         with patch("background_scheduler.crud.get_agents_cached", return_value=[mock_agent]):  # Only 1 agent
             await scheduler._process_room_autonomous_round(mock_db, mock_room)
 
@@ -308,11 +354,17 @@ class TestProcessRoomAutonomousRound:
         scheduler = BackgroundScheduler(mock_orchestrator, mock_agent_manager, mock_get_db)
 
         mock_db = AsyncMock()
-        mock_room = Mock(id=1, max_interactions=10)  # Already at limit
+        mock_room = Mock(id=1, name="Test Room", max_interactions=10)  # Already at limit
         mock_agent1 = Mock(is_critic=False)
         mock_agent2 = Mock(is_critic=False)
 
-        with patch("background_scheduler.crud.get_agents", return_value=[mock_agent1, mock_agent2]):
+        # Mock db.merge to return the objects themselves
+        async def mock_merge(obj, load=True):
+            return obj
+
+        mock_db.merge = mock_merge
+
+        with patch("background_scheduler.crud.get_agents_cached", return_value=[mock_agent1, mock_agent2]):
             await scheduler._process_room_autonomous_round(mock_db, mock_room)
 
             # Should not process

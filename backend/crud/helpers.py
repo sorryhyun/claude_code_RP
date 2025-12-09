@@ -3,12 +3,14 @@ Helper functions shared across CRUD operations.
 """
 
 import base64
+import io
 import logging
 import re
 from typing import Optional
 
 import models
 from core.paths import get_agents_dir
+from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -75,6 +77,7 @@ def merge_agent_configs(provided_config, file_config):
 def save_base64_profile_pic(agent_name: str, base64_data: str) -> bool:
     """
     Save a base64-encoded profile picture to the filesystem.
+    Converts images to WebP format for optimized storage (except SVG).
 
     Args:
         agent_name: The agent's name
@@ -84,7 +87,7 @@ def save_base64_profile_pic(agent_name: str, base64_data: str) -> bool:
         True if saved successfully, False otherwise
     """
     # Match data URL format: data:image/{type};base64,{data}
-    match = re.match(r"data:image/(\w+);base64,(.+)", base64_data)
+    match = re.match(r"data:image/([\w+]+);base64,(.+)", base64_data)
     if not match:
         logger.warning(f"Invalid base64 data URL format for agent {agent_name}")
         return False
@@ -92,18 +95,8 @@ def save_base64_profile_pic(agent_name: str, base64_data: str) -> bool:
     image_type = match.group(1).lower()
     encoded_data = match.group(2)
 
-    # Map common MIME types to file extensions
-    ext_map = {
-        "png": ".png",
-        "jpg": ".jpg",
-        "jpeg": ".jpg",
-        "gif": ".gif",
-        "webp": ".webp",
-        "svg+xml": ".svg",
-        "svg": ".svg",
-    }
-
-    file_ext = ext_map.get(image_type, ".png")
+    # SVG files are vector format - keep as-is without conversion
+    is_svg = image_type in ("svg", "svg+xml")
 
     try:
         # Decode base64 data
@@ -116,17 +109,34 @@ def save_base64_profile_pic(agent_name: str, base64_data: str) -> bool:
         # Create agent folder if it doesn't exist
         agent_folder.mkdir(parents=True, exist_ok=True)
 
-        # Save to profile.{ext}
-        profile_path = agent_folder / f"profile{file_ext}"
-
-        # Remove any existing profile pictures with different extensions
+        # Remove any existing profile pictures
         for old_file in agent_folder.glob("profile.*"):
-            if old_file != profile_path:
-                old_file.unlink()
+            old_file.unlink()
 
-        # Write the new profile picture
-        profile_path.write_bytes(image_data)
-        logger.info(f"Saved profile picture for {agent_name} to {profile_path}")
+        if is_svg:
+            # Save SVG as-is (vector format, no conversion needed)
+            profile_path = agent_folder / "profile.svg"
+            profile_path.write_bytes(image_data)
+            logger.info(f"Saved SVG profile picture for {agent_name} to {profile_path}")
+        else:
+            # Convert raster images (PNG, JPG, GIF, WebP) to WebP for optimization
+            profile_path = agent_folder / "profile.webp"
+
+            # Open image with PIL
+            img = Image.open(io.BytesIO(image_data))
+
+            # Handle transparency: WebP supports alpha channel
+            # Convert palette mode (P) with transparency to RGBA
+            if img.mode == "P" and "transparency" in img.info:
+                img = img.convert("RGBA")
+            # Convert other modes to RGB or RGBA as appropriate
+            elif img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA" if img.mode == "LA" else "RGB")
+
+            # Save as WebP with good quality (85 is a good balance of quality/size)
+            img.save(profile_path, "WEBP", quality=85, method=4)
+            logger.info(f"Converted and saved profile picture for {agent_name} to {profile_path}")
+
         return True
 
     except Exception as e:

@@ -232,3 +232,31 @@ class RoomSummary(RoomBase):
 
     class Config:
         from_attributes = True
+
+
+class RoomWithAgents(RoomBase):
+    """Room with agents only (no messages) - for performance-sensitive endpoints."""
+
+    id: int
+    owner_id: Optional[str] = None
+    max_interactions: Optional[int] = None
+    is_paused: bool = False
+    created_at: datetime
+    last_activity_at: Optional[datetime] = None
+    last_read_at: Optional[datetime] = None
+    agents: List[Agent] = []
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime, _info):
+        return _serialize_utc_datetime(dt)
+
+    @field_serializer("last_activity_at")
+    def serialize_last_activity_at(self, dt: Optional[datetime], _info):
+        return _serialize_utc_datetime(dt) if dt else None
+
+    @field_serializer("last_read_at")
+    def serialize_last_read_at(self, dt: Optional[datetime], _info):
+        return _serialize_utc_datetime(dt) if dt else None
+
+    class Config:
+        from_attributes = True
