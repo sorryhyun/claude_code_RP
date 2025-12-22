@@ -5,9 +5,9 @@ Unit tests for utility functions (serializers, helpers, timezone).
 from datetime import datetime, timezone
 
 import pytest
-from utils.helpers import get_pool_key
-from utils.serializers import serialize_utc_datetime
-from utils.timezone import KST, format_kst_timestamp, make_timezone_aware, utc_to_kst
+from domain.task_identifier import TaskIdentifier
+from i18n.serializers import serialize_bool, serialize_utc_datetime
+from i18n.timezone import KST, format_kst_timestamp, make_timezone_aware, utc_to_kst
 
 
 class TestSerializers:
@@ -33,40 +33,46 @@ class TestSerializers:
         assert result.tzinfo == timezone.utc
         assert result == aware_dt
 
-
-class TestHelpers:
-    """Tests for general helper functions."""
+    @pytest.mark.unit
+    def test_serialize_bool_true(self):
+        """Test converting truthy values to boolean."""
+        assert serialize_bool(1) is True
+        assert serialize_bool(2) is True  # Any non-zero
+        assert serialize_bool(100) is True
+        assert serialize_bool(True) is True
 
     @pytest.mark.unit
-    def test_get_pool_key(self):
-        """Test pool key generation for room-agent pairs."""
-        from domain.task_identifier import TaskIdentifier
+    def test_serialize_bool_false(self):
+        """Test converting falsy values to boolean."""
+        assert serialize_bool(0) is False
+        assert serialize_bool(False) is False
 
-        key = get_pool_key(1, 2)
+
+class TestTaskIdentifier:
+    """Tests for TaskIdentifier (used as pool key for room-agent pairs)."""
+
+    @pytest.mark.unit
+    def test_task_identifier_creation(self):
+        """Test TaskIdentifier creation for room-agent pairs."""
+        key = TaskIdentifier(room_id=1, agent_id=2)
         assert isinstance(key, TaskIdentifier)
         assert key.room_id == 1
         assert key.agent_id == 2
 
-        key = get_pool_key(100, 200)
+        key = TaskIdentifier(room_id=100, agent_id=200)
         assert isinstance(key, TaskIdentifier)
         assert key.room_id == 100
         assert key.agent_id == 200
 
     @pytest.mark.unit
-    def test_get_pool_key_uniqueness(self):
+    def test_task_identifier_uniqueness(self):
         """Test that different room-agent pairs produce different keys."""
-        key1 = get_pool_key(1, 2)
-        key2 = get_pool_key(2, 1)
-        key3 = get_pool_key(1, 1)
+        key1 = TaskIdentifier(room_id=1, agent_id=2)
+        key2 = TaskIdentifier(room_id=2, agent_id=1)
+        key3 = TaskIdentifier(room_id=1, agent_id=1)
 
         assert key1 != key2
         assert key1 != key3
-        # Verify they are TaskIdentifier instances
-        from domain.task_identifier import TaskIdentifier
-
-        assert isinstance(key1, TaskIdentifier)
-        assert isinstance(key2, TaskIdentifier)
-        assert isinstance(key3, TaskIdentifier)
         assert key2 != key3
 
 
@@ -146,7 +152,7 @@ class TestMemoryParser:
     @pytest.mark.unit
     def test_parse_long_term_memory(self, tmp_path):
         """Test parsing long-term memory file with subtitles."""
-        from utils.memory_parser import parse_long_term_memory
+        from sdk.memory.parser import parse_long_term_memory
 
         # Create test memory file
         memory_file = tmp_path / "long_term_memory.md"
@@ -172,7 +178,7 @@ Third memory here.
     @pytest.mark.unit
     def test_parse_long_term_memory_not_found(self, tmp_path):
         """Test parsing non-existent memory file."""
-        from utils.memory_parser import parse_long_term_memory
+        from sdk.memory.parser import parse_long_term_memory
 
         result = parse_long_term_memory(tmp_path / "nonexistent.md")
         assert result == {}
@@ -180,7 +186,7 @@ Third memory here.
     @pytest.mark.unit
     def test_get_memory_subtitles(self, tmp_path):
         """Test extracting memory subtitles."""
-        from utils.memory_parser import get_memory_subtitles
+        from sdk.memory.parser import get_memory_subtitles
 
         memory_file = tmp_path / "long_term_memory.md"
         memory_file.write_text("""## [Sub1]
@@ -199,7 +205,7 @@ Content 2
     @pytest.mark.unit
     def test_get_memory_by_subtitle(self, tmp_path):
         """Test retrieving specific memory by subtitle."""
-        from utils.memory_parser import get_memory_by_subtitle
+        from sdk.memory.parser import get_memory_by_subtitle
 
         memory_file = tmp_path / "long_term_memory.md"
         memory_file.write_text("""## [Important]
@@ -217,7 +223,7 @@ Random stuff here.
     @pytest.mark.unit
     def test_get_memory_by_subtitle_not_found(self, tmp_path):
         """Test retrieving non-existent memory."""
-        from utils.memory_parser import get_memory_by_subtitle
+        from sdk.memory.parser import get_memory_by_subtitle
 
         memory_file = tmp_path / "long_term_memory.md"
         memory_file.write_text("## [Exists]\nContent")

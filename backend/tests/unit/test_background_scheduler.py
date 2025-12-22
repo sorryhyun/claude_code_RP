@@ -225,12 +225,11 @@ class TestProcessRoomAutonomousRound:
 
     @pytest.mark.asyncio
     async def test_process_room_autonomous_round_basic(self):
-        """Test processing autonomous round."""
+        """Test processing autonomous round with tape-based scheduling."""
         mock_orchestrator = Mock()
         mock_orchestrator.active_room_tasks = {}
-        mock_orchestrator.max_follow_up_rounds = 5
-        mock_orchestrator._count_agent_messages = AsyncMock(return_value=0)
-        mock_orchestrator._follow_up_rounds = AsyncMock()
+        mock_orchestrator.max_total_messages = 30
+        mock_orchestrator.response_generator = Mock()
 
         mock_agent_manager = Mock()
         mock_get_db = Mock()
@@ -239,15 +238,32 @@ class TestProcessRoomAutonomousRound:
 
         mock_db = AsyncMock()
         mock_room = Mock(id=1, name="Test Room", max_interactions=None)
-        mock_agent1 = Mock(is_critic=False)
-        mock_agent2 = Mock(is_critic=False)
+        # Create proper mock agents with required attributes
+        mock_agent1 = Mock(id=1, name="Agent1", is_critic=False, priority=0, interrupt_every_turn=0, transparent=0)
+        mock_agent2 = Mock(id=2, name="Agent2", is_critic=False, priority=0, interrupt_every_turn=0, transparent=0)
 
-        with patch("background_scheduler.crud.get_agents", return_value=[mock_agent1, mock_agent2]):
+        # Mock the tape executor to return a successful result
+        mock_execution_result = Mock(all_skipped=False, total_responses=1)
+
+        with (
+            patch("background_scheduler.crud.get_agents_cached", new=AsyncMock(return_value=[mock_agent1, mock_agent2])),
+            patch("background_scheduler.TapeExecutor") as mock_executor_class,
+            patch("background_scheduler.TapeGenerator") as mock_generator_class,
+        ):
+            mock_executor = Mock()
+            mock_executor.execute = AsyncMock(return_value=mock_execution_result)
+            mock_executor_class.return_value = mock_executor
+
+            mock_generator = Mock()
+            mock_tape = Mock()
+            mock_generator.generate_follow_up_round.return_value = mock_tape
+            mock_generator_class.return_value = mock_generator
+
             await scheduler._process_room_autonomous_round(mock_db, mock_room)
 
-            # Should call follow-up rounds with limit of 1
-            mock_orchestrator._follow_up_rounds.assert_awaited_once()
-            assert mock_orchestrator.max_follow_up_rounds == 5  # Restored
+            # Should generate and execute a follow-up tape
+            mock_generator.generate_follow_up_round.assert_called_once_with(round_num=0)
+            mock_executor.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_process_room_skips_if_already_processing(self):
@@ -299,8 +315,8 @@ class TestProcessRoomAutonomousRound:
         """Test skipping room that reached max interactions."""
         mock_orchestrator = Mock()
         mock_orchestrator.active_room_tasks = {}
-        mock_orchestrator._count_agent_messages = AsyncMock(return_value=10)
-        mock_orchestrator._follow_up_rounds = AsyncMock()
+        mock_orchestrator.max_total_messages = 30
+        mock_orchestrator.response_generator = Mock()
 
         mock_agent_manager = Mock()
         mock_get_db = Mock()
@@ -308,15 +324,23 @@ class TestProcessRoomAutonomousRound:
         scheduler = BackgroundScheduler(mock_orchestrator, mock_agent_manager, mock_get_db)
 
         mock_db = AsyncMock()
-        mock_room = Mock(id=1, max_interactions=10)  # Already at limit
-        mock_agent1 = Mock(is_critic=False)
-        mock_agent2 = Mock(is_critic=False)
+        mock_room = Mock(id=1, name="Test Room", max_interactions=10)  # Already at limit
+        mock_agent1 = Mock(id=1, name="Agent1", is_critic=False, priority=0, interrupt_every_turn=0, transparent=0)
+        mock_agent2 = Mock(id=2, name="Agent2", is_critic=False, priority=0, interrupt_every_turn=0, transparent=0)
 
-        with patch("background_scheduler.crud.get_agents", return_value=[mock_agent1, mock_agent2]):
+        with (
+            patch("background_scheduler.crud.get_agents_cached", new=AsyncMock(return_value=[mock_agent1, mock_agent2])),
+            patch.object(scheduler, "_count_agent_messages", new=AsyncMock(return_value=10)),
+            patch("background_scheduler.TapeExecutor") as mock_executor_class,
+        ):
+            mock_executor = Mock()
+            mock_executor.execute = AsyncMock()
+            mock_executor_class.return_value = mock_executor
+
             await scheduler._process_room_autonomous_round(mock_db, mock_room)
 
-            # Should not process
-            mock_orchestrator._follow_up_rounds.assert_not_awaited()
+            # Should not process - tape executor should not be called
+            mock_executor.execute.assert_not_awaited()
 
 
 class TestProcessActiveRooms:
@@ -351,11 +375,7 @@ class TestProcessActiveRooms:
 
         scheduler = BackgroundScheduler(mock_orchestrator, mock_agent_manager, session_factory)
 
-        mock_rooms = [
-            Mock(id=1, max_interactions=None),
-            Mock(id=2, max_interactions=None),
-            Mock(id=3, max_interactions=None),
-        ]
+        mock_rooms = [Mock(id=1, max_interactions=None), Mock(id=2, max_interactions=None), Mock(id=3, max_interactions=None)]
 
         with (
             patch.object(scheduler, "_get_active_rooms", return_value=mock_rooms),

@@ -14,12 +14,18 @@ import crud
 import models
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from orchestration import ChatOrchestrator
+from orchestration.agent_ordering import separate_interrupt_agents
+from orchestration.tape import TapeExecutor, TapeGenerator
 from sdk import AgentManager
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger("BackgroundScheduler")
+
+# Suppress noisy APScheduler "max instances reached" warnings
+# These are expected during heavy load and not actionable
+logging.getLogger("apscheduler.scheduler").setLevel(logging.ERROR)
 
 
 class BackgroundScheduler:
@@ -38,10 +44,6 @@ class BackgroundScheduler:
         self.get_db_session = get_db_session
         self.max_concurrent_rooms = max_concurrent_rooms
         self.is_running = False
-        # Error tracking for backoff
-        self._consecutive_errors = 0
-        self._max_backoff_errors = 5  # After this many errors, skip processing for a cycle
-        self._cleanup_tasks: set[asyncio.Task] = set()  # Track cleanup tasks
 
     def start(self):
         """Start the background scheduler."""
@@ -55,6 +57,7 @@ class BackgroundScheduler:
                 replace_existing=True,
                 max_instances=1,  # Only one instance at a time (prevents overwhelming system)
                 coalesce=True,  # Skip missed runs if previous job still running
+                misfire_grace_time=None,  # Never misfire - just skip if busy (suppresses warnings)
             )
 
             # Clean up expired cache entries every 5 minutes
@@ -83,35 +86,20 @@ class BackgroundScheduler:
         - It has messages in the last 5 minutes
         - It's not paused
         - It has at least 2 agents
-
-        Implements exponential backoff on repeated errors.
         """
-        # Check if we should skip due to backoff
-        if self._consecutive_errors >= self._max_backoff_errors:
-            logger.warning(
-                f"⏸️ Skipping processing cycle due to {self._consecutive_errors} consecutive errors. "
-                "Will retry next cycle."
-            )
-            self._consecutive_errors = 0  # Reset to try again next cycle
-            return
-
         try:
             async with self._session_scope() as db:
                 active_rooms = await self._get_active_rooms(db)
 
             if not active_rooms:
                 # Don't log when there's no activity (too noisy)
-                # Reset error counter on successful (idle) cycle
-                self._consecutive_errors = 0
                 return
 
             logger.info(f"🔄 Processing {len(active_rooms)} active room(s)")
 
             semaphore = asyncio.Semaphore(self.max_concurrent_rooms) if self.max_concurrent_rooms else None
-            room_errors = 0
 
             async def process_with_error_handling(room):
-                nonlocal room_errors
                 try:
                     if semaphore:
                         async with semaphore:
@@ -119,7 +107,6 @@ class BackgroundScheduler:
                     else:
                         await self._process_room_for_background_job(room)
                 except Exception as e:
-                    room_errors += 1
                     logger.error(f"❌ Error processing room {room.id}: {e}")
                     import traceback
 
@@ -128,18 +115,8 @@ class BackgroundScheduler:
             # Process all active rooms concurrently with a small cap
             await asyncio.gather(*[process_with_error_handling(room) for room in active_rooms])
 
-            # Update error tracking
-            if room_errors == 0:
-                self._consecutive_errors = 0  # Reset on success
-            elif room_errors == len(active_rooms):
-                self._consecutive_errors += 1  # All rooms failed
-                logger.warning(
-                    f"⚠️ All {room_errors} room(s) failed. Consecutive error count: {self._consecutive_errors}"
-                )
-
         except Exception as e:
-            self._consecutive_errors += 1
-            logger.error(f"💥 Error in _process_active_rooms (consecutive: {self._consecutive_errors}): {e}")
+            logger.error(f"💥 Error in _process_active_rooms: {e}")
             import traceback
 
             traceback.print_exc()
@@ -167,6 +144,7 @@ class BackgroundScheduler:
         Criteria:
         - Has messages in the last 5 minutes
         - Not paused
+        - Not finished (all agents haven't skipped)
         - Has at least 2 agents
         """
         # Calculate cutoff time (5 minutes ago)
@@ -176,7 +154,11 @@ class BackgroundScheduler:
         stmt = (
             select(models.Room)
             .options(selectinload(models.Room.agents))  # Eager load agents
-            .where(models.Room.is_paused == False, models.Room.last_activity_at >= cutoff_time)
+            .where(
+                models.Room.is_paused == False,
+                models.Room.is_finished == False,
+                models.Room.last_activity_at >= cutoff_time,
+            )
             .order_by(models.Room.last_activity_at.desc())
         )
 
@@ -198,28 +180,15 @@ class BackgroundScheduler:
         return active_rooms
 
     def _cleanup_completed_tasks(self):
-        """
-        Remove completed tasks from active_room_tasks to prevent memory leak.
-        Also logs any exceptions that occurred in completed tasks.
-        """
+        """Remove completed tasks from active_room_tasks to prevent memory leak."""
         completed_rooms = [room_id for room_id, task in self.chat_orchestrator.active_room_tasks.items() if task.done()]
         for room_id in completed_rooms:
-            task = self.chat_orchestrator.active_room_tasks[room_id]
             del self.chat_orchestrator.active_room_tasks[room_id]
-
-            # Check if task had an exception (important for debugging)
-            try:
-                exc = task.exception()
-                if exc:
-                    logger.error(f"Task for room {room_id} failed with exception: {exc}")
-            except (asyncio.CancelledError, asyncio.InvalidStateError):
-                pass  # Task was cancelled or still running (shouldn't happen since we check done())
-
             logger.debug(f"Cleaned up completed task for room {room_id}")
 
     async def _process_room_autonomous_round(self, db: AsyncSession, room: models.Room):
         """
-        Process one autonomous round for a room.
+        Process one autonomous round for a room using tape-based scheduling.
 
         This simulates agent interactions without a user message trigger.
         Agents will decide whether to respond based on the conversation context.
@@ -249,27 +218,50 @@ class BackgroundScheduler:
 
         # Check if room has hit max interactions
         if room.max_interactions is not None:
-            current_count = await self.chat_orchestrator._count_agent_messages(db, room.id)
+            current_count = await self._count_agent_messages(db, room.id)
             if current_count >= room.max_interactions:
                 logger.debug(f"Room {room.id} reached max interactions ({room.max_interactions})")
                 return
 
-        # Run one follow-up round
-        # Polling architecture doesn't use real-time broadcasting
+        # Run one follow-up round using tape-based scheduling
         from domain.contexts import OrchestrationContext
 
         orch_context = OrchestrationContext(db=db, room_id=room.id, agent_manager=self.agent_manager)
 
-        # Use the existing _follow_up_rounds logic with max 1 round
-        original_max = self.chat_orchestrator.max_follow_up_rounds
-        self.chat_orchestrator.max_follow_up_rounds = 1  # Only one round at a time
+        # Separate interrupt agents from regular agents
+        interrupt_agents, non_interrupt_agents = separate_interrupt_agents(agents)
 
-        try:
-            await self.chat_orchestrator._follow_up_rounds(orch_context=orch_context, agents=agents, total_messages=0)
-            logger.info(f"✅ Autonomous round complete | Room: {room.id}")
-        finally:
-            # Restore original setting
-            self.chat_orchestrator.max_follow_up_rounds = original_max
+        # Build agent lookup dict
+        all_non_critic_agents = non_interrupt_agents + interrupt_agents
+        agents_by_id = {a.id: a for a in all_non_critic_agents}
+
+        # Create tape generator and executor
+        generator = TapeGenerator(non_interrupt_agents, interrupt_agents)
+        executor = TapeExecutor(
+            response_generator=self.chat_orchestrator.response_generator,
+            agents_by_id=agents_by_id,
+            max_total_messages=self.chat_orchestrator.max_total_messages,
+        )
+
+        # Generate and execute one follow-up round tape
+        tape = generator.generate_follow_up_round(round_num=0)
+        result = await executor.execute(tape=tape, orch_context=orch_context, user_message_content=None)
+
+        if result.all_skipped:
+            logger.info(f"🏁 All agents skipped in room {room.id}. Marking as finished.")
+            await crud.mark_room_as_finished(db, room.id)
+        else:
+            logger.info(f"✅ Autonomous round complete | Room: {room.id} | Responses: {result.total_responses}")
+
+    async def _count_agent_messages(self, db: AsyncSession, room_id: int) -> int:
+        """Count the number of agent messages (role='assistant') in a room."""
+        result = await db.execute(
+            select(func.count(models.Message.id)).where(
+                models.Message.room_id == room_id,
+                models.Message.role == "assistant",
+            )
+        )
+        return result.scalar() or 0
 
     async def _cleanup_cache(self):
         """
@@ -277,7 +269,7 @@ class BackgroundScheduler:
         This runs every 5 minutes to prevent memory bloat.
         """
         try:
-            from utils.cache import get_cache
+            from infrastructure.cache import get_cache
 
             cache = get_cache()
             cache.cleanup_expired()

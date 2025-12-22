@@ -52,7 +52,7 @@ def separate_interrupt_agents(agents: List) -> Tuple[List, List]:
     regular_agents = []
 
     for agent in agents:
-        if getattr(agent, "interrupt_every_turn", False):
+        if getattr(agent, "interrupt_every_turn", 0) == 1:
             interrupt_agents.append(agent)
         else:
             regular_agents.append(agent)
@@ -61,8 +61,3 @@ def separate_interrupt_agents(agents: List) -> Tuple[List, List]:
     interrupt_agents.sort(key=lambda a: getattr(a, "priority", 0), reverse=True)
 
     return interrupt_agents, regular_agents
-
-
-def is_transparent(agent) -> bool:
-    """Check if agent is transparent (doesn't trigger other agents to respond)."""
-    return getattr(agent, "transparent", False)

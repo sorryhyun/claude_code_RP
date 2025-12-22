@@ -1,0 +1,20 @@
+{
+  "connected": "Connected",
+  "disconnected": "Disconnected",
+  "messageAsUser": "Message as {{persona}}...",
+  "welcomeTitle": "Welcome to ChitChats",
+  "welcomeSubtitle": "Get started by creating a chatroom or selecting an agent",
+  "createChatroom": "Create Chatroom",
+  "browseAgents": "Browse Agents",
+  "clickAgentHint": "Click an agent to start a direct chat, or create a new chatroom for multiple agents",
+  "roomAgents": "Room Agents",
+  "resetConversation": "Reset Conversation?",
+  "resetWarning": "This action cannot be undone",
+  "resetConfirmMessage": "Are you sure you want to reset this room? This will permanently remove the entire conversation history.",
+  "reset": "Reset",
+  "conversationReset": "Conversation reset",
+  "messagesRefreshed": "Messages refreshed",
+  "dropImageHere": "Drop image here",
+  "failedToReset": "Failed to reset conversation",
+  "failedToResetRetry": "Failed to reset conversation. Please try again."
+}

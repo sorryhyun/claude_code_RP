@@ -1,23 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useAgents } from './hooks/useAgents';
-import { useRooms } from './hooks/useRooms';
+import { useState, useEffect } from 'react';
 import { useFocusTrap } from './hooks/useFocusTrap';
 import { useAuth } from './contexts/AuthContext';
-import { MainSidebar } from './components/MainSidebar';
-import { ChatRoom } from './components/ChatRoom';
+import { RoomProvider, useRoomContext } from './contexts/RoomContext';
+import { AgentProvider, useAgentContext } from './contexts/AgentContext';
+import { MainSidebar } from './components/sidebar/MainSidebar';
+import { ChatRoom } from './components/chat-room/ChatRoom';
 import { AgentProfileModal } from './components/AgentProfileModal';
-import { HowToUseModal } from './components/HowToUseModal';
+import { HowToDocsModal } from './components/HowToDocsModal';
 import { Login } from './components/Login';
-import type { Agent } from './types';
-import { api } from './utils/api';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Loader2, Menu, X } from 'lucide-react';
+import { BREAKPOINTS } from './config/breakpoints';
 
-function App() {
+function AppContent() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { agents, loading: agentsLoading, createAgent, deleteAgent, refreshAgents } = useAgents();
-  const { rooms, loading: roomsLoading, createRoom, deleteRoom, renameRoom, refreshRooms, markRoomAsReadOptimistic } = useRooms();
+  const roomContext = useRoomContext();
+  const agentContext = useAgentContext();
 
   // Mobile viewport height fix - sets CSS variable to actual window height
   useEffect(() => {
@@ -47,79 +43,64 @@ function App() {
     };
   }, []);
 
-  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
-  const [profileAgent, setProfileAgent] = useState<Agent | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [showHowToUse, setShowHowToUse] = useState(false);
+  // Desktop sidebar collapse state with localStorage persistence
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('sidebarCollapsed');
+    return saved === 'true';
+  });
+  const [isMobile, setIsMobile] = useState(window.innerWidth < BREAKPOINTS.lg);
+  const [showDocsModal, setShowDocsModal] = useState(false);
+
+  // Track window size for responsive behavior
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < BREAKPOINTS.lg);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Focus trap for mobile sidebar drawer
   const sidebarRef = useFocusTrap<HTMLDivElement>(isSidebarOpen);
 
   // Close sidebar when a room/agent is selected on mobile
   useEffect(() => {
-    if (selectedRoomId !== null || selectedAgentId !== null) {
+    if (roomContext.selectedRoomId !== null || agentContext.selectedAgentId !== null) {
       setIsSidebarOpen(false);
     }
-  }, [selectedRoomId, selectedAgentId]);
+  }, [roomContext.selectedRoomId, agentContext.selectedAgentId]);
 
-  // Handle Escape key to close sidebar - stable handler that doesn't re-register
-  const handleEscape = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      setIsSidebarOpen(false);
-    }
-  }, []);
-
+  // Handle Escape key to close sidebar
   useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isSidebarOpen) {
+        setIsSidebarOpen(false);
+      }
+    };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [handleEscape]);
+  }, [isSidebarOpen]);
+
+  // Persist desktop sidebar collapse state
+  useEffect(() => {
+    localStorage.setItem('sidebarCollapsed', String(isSidebarCollapsed));
+  }, [isSidebarCollapsed]);
 
   const handleSelectAgent = async (agentId: number) => {
-    try {
-      // Get or create direct room with this agent
-      const room = await api.getAgentDirectRoom(agentId);
-      setSelectedRoomId(room.id);
-      setSelectedAgentId(agentId);
-    } catch (err) {
-      console.error('Failed to open direct chat:', err);
-    }
+    await agentContext.selectAgent(agentId);
   };
 
   const handleSelectRoom = (roomId: number) => {
-    setSelectedRoomId(roomId);
-    setSelectedAgentId(null);
-  };
-
-  const handleDeleteRoom = async (roomId: number) => {
-    await deleteRoom(roomId);
-    // If we deleted the currently selected room, clear the selection
-    if (selectedRoomId === roomId) {
-      setSelectedRoomId(null);
-      setSelectedAgentId(null);
-    }
-  };
-
-  const handleViewProfile = (agent: Agent) => {
-    setProfileAgent(agent);
-  };
-
-  const handleCloseProfile = () => {
-    setProfileAgent(null);
-  };
-
-  const handleUpdateProfile = () => {
-    refreshAgents();
+    agentContext.clearSelection();
+    roomContext.selectRoom(roomId);
   };
 
   // Show login screen if not authenticated
   if (authLoading) {
     return (
-      <div className="h-full flex items-center justify-center bg-background">
-        <div className="flex items-center gap-3">
-          <Loader2 className="w-6 h-6 animate-spin text-accent" />
-          <p className="text-lg text-muted-foreground">Loading...</p>
-        </div>
+      <div className="h-full flex items-center justify-center">
+        <p className="text-lg sm:text-xl text-gray-600">Loading...</p>
       </div>
     );
   }
@@ -128,32 +109,54 @@ function App() {
     return <Login />;
   }
 
-  if (agentsLoading || roomsLoading) {
+  if (agentContext.loading || roomContext.loading) {
     return (
-      <div className="h-full flex items-center justify-center bg-background">
-        <div className="flex items-center gap-3">
-          <Loader2 className="w-6 h-6 animate-spin text-accent" />
-          <p className="text-lg text-muted-foreground">Loading...</p>
-        </div>
+      <div className="h-full flex items-center justify-center">
+        <p className="text-lg sm:text-xl text-gray-600">Loading...</p>
       </div>
     );
   }
 
+  const handleToggleSidebar = () => {
+    // On mobile: toggle drawer (isSidebarOpen)
+    // On desktop: toggle collapse (isSidebarCollapsed)
+    if (isMobile) {
+      setIsSidebarOpen(!isSidebarOpen);
+    } else {
+      setIsSidebarCollapsed(!isSidebarCollapsed);
+    }
+  };
+
   return (
-    <div className="h-full flex bg-background relative">
-      {/* Mobile Hamburger Menu Button - Fixed position */}
-      <Button
-        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-        size="icon"
-        className="lg:hidden fixed top-4 left-4 z-50 h-12 w-12 rounded-lg shadow-lg bg-accent hover:bg-accent/90"
+    <div className="h-full flex bg-white relative overflow-hidden">
+      {/* Hamburger Menu Button - Always visible, fixed position */}
+      <button
+        onClick={handleToggleSidebar}
+        className="fixed top-2 left-2 z-50 p-2.5 min-w-[44px] min-h-[44px] bg-slate-700 text-white rounded-lg shadow-lg hover:bg-slate-600 active:bg-slate-500 transition-colors flex items-center justify-center"
         aria-label="Toggle menu"
       >
-        {isSidebarOpen ? (
-          <X className="w-6 h-6" />
+        {isMobile ? (
+          isSidebarOpen ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          )
         ) : (
-          <Menu className="w-6 h-6" />
+          isSidebarCollapsed ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            </svg>
+          )
         )}
-      </Button>
+      </button>
 
       {/* Mobile Overlay */}
       {isSidebarOpen && (
@@ -161,7 +164,7 @@ function App() {
           role="button"
           tabIndex={0}
           aria-label="Close menu"
-          className="lg:hidden fixed inset-0 bg-black/60 z-30 transition-opacity duration-300 ease-in-out"
+          className="lg:hidden fixed inset-0 bg-black/40 z-30 transition-opacity duration-300 ease-in-out"
           onClick={() => setIsSidebarOpen(false)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -172,56 +175,69 @@ function App() {
         />
       )}
 
-      {/* Main Sidebar with Tabs - Drawer on mobile */}
+      {/* Main Sidebar with Tabs - Drawer on mobile, collapsible on desktop */}
       <div
         ref={sidebarRef}
-        className={cn(
-          'fixed lg:static inset-y-0 left-0 z-40',
-          'transform transition-transform duration-300 ease-in-out',
-          isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-        )}
+        className={`
+          fixed lg:static inset-y-0 left-0 z-40
+          transform transition-all duration-300 ease-in-out
+          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+          ${isSidebarCollapsed ? 'lg:-translate-x-full lg:w-0 lg:overflow-hidden' : 'lg:translate-x-0'}
+        `}
       >
         <MainSidebar
-          rooms={rooms}
-          selectedRoomId={selectedRoomId}
           onSelectRoom={handleSelectRoom}
-          onCreateRoom={createRoom}
-          onDeleteRoom={handleDeleteRoom}
-          agents={agents}
-          selectedAgentId={selectedAgentId}
           onSelectAgent={handleSelectAgent}
-          onCreateAgent={createAgent}
-          onDeleteAgent={deleteAgent}
-          onViewProfile={handleViewProfile}
-          onShowHowToUse={() => setShowHowToUse(true)}
+          onOpenDocs={() => setShowDocsModal(true)}
         />
       </div>
 
       {/* Main Chat Area */}
       <ChatRoom
-        roomId={selectedRoomId}
-        onRoomRead={refreshRooms}
-        onMarkRoomAsRead={markRoomAsReadOptimistic}
-        onRenameRoom={renameRoom}
-        onCreateRoom={createRoom}
-        onOpenSidebar={() => setIsSidebarOpen(true)}
-        onShowHowToUse={() => setShowHowToUse(true)}
+        roomId={roomContext.selectedRoomId}
+        onRoomRead={roomContext.refreshRooms}
+        onMarkRoomAsRead={roomContext.markRoomAsReadOptimistic}
+        onRenameRoom={roomContext.renameRoom}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
 
       {/* Agent Profile Modal */}
-      {profileAgent && (
+      {agentContext.profileAgent && (
         <AgentProfileModal
-          agent={profileAgent}
-          onClose={handleCloseProfile}
-          onUpdate={handleUpdateProfile}
+          agent={agentContext.profileAgent}
+          onClose={agentContext.closeProfile}
+          onUpdate={agentContext.refreshAgents}
         />
       )}
 
-      {/* How To Use Modal */}
-      {showHowToUse && (
-        <HowToUseModal onClose={() => setShowHowToUse(false)} />
+      {/* How To Docs Modal */}
+      {showDocsModal && (
+        <HowToDocsModal onClose={() => setShowDocsModal(false)} />
       )}
     </div>
+  );
+}
+
+// Main App component with providers
+function App() {
+  return (
+    <RoomProvider>
+      <AgentProviderWrapper />
+    </RoomProvider>
+  );
+}
+
+// Wrapper to access room context in agent provider
+function AgentProviderWrapper() {
+  const roomContext = useRoomContext();
+
+  return (
+    <AgentProvider onAgentRoomSelected={(roomId) => {
+      roomContext.selectRoom(roomId);
+    }}>
+      <AppContent />
+    </AgentProvider>
   );
 }
 

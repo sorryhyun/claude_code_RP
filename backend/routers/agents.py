@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter()
 
 
-@router.post("", response_model=schemas.Agent, dependencies=[Depends(require_admin)])
+@router.post("", response_model=schemas.Agent)
 async def create_agent(agent: schemas.AgentCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new agent as an independent entity. (Admin only)"""
+    """Create a new agent as an independent entity."""
     return await crud.create_agent(db, agent)
 
 

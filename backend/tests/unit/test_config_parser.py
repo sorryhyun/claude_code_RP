@@ -282,29 +282,14 @@ class TestParseAgentConfigLongTermMemory:
         shutil.rmtree(temp_dir)
 
     @pytest.mark.unit
-    def test_parse_agent_config_with_long_term_memory(self, temp_agent_with_ltm, monkeypatch):
+    def test_parse_agent_config_with_long_term_memory(self, temp_agent_with_ltm):
         """Test parsing agent config with long-term memory file."""
         temp_dir, agent_dir = temp_agent_with_ltm
 
-        # Set environment to use long_term_memory.md instead of consolidated_memory.md
-        monkeypatch.setenv("RECALL_MEMORY_FILE", "long_term_memory")
-
-        # Reset singletons to pick up the new environment variable
-        from core import reset_settings
-        from services.memory_mode_service import reset_memory_mode_service
-
-        reset_settings()
-        reset_memory_mode_service()
-
-        # Need to reload the parser module to pick up the new environment variable
-        import importlib
-
-        import config.parser
-
-        importlib.reload(config.parser)
+        # Create a long-term memory file with proper format: ## [subtitle]
+        # Using default filename: consolidated_memory.md
         from config.parser import _parse_folder_config
 
-        # Create a long-term memory file with proper format: ## [subtitle]
         ltm_content = """## [Memory 1]
 
 Content of memory 1
@@ -313,7 +298,7 @@ Content of memory 1
 
 Content of memory 2
 """
-        (agent_dir / "long_term_memory.md").write_text(ltm_content)
+        (agent_dir / "consolidated_memory.md").write_text(ltm_content)
 
         config = _parse_folder_config(agent_dir)
 

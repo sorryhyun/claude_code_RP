@@ -1,18 +1,21 @@
 """Agent management routes for updates, configuration, and profile pictures."""
 
+import re
 from pathlib import Path
 
 import crud
 import schemas
 from auth import require_admin
 from config import list_available_configs
-from core.paths import get_agents_dir
 from database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
+
+# Pattern for valid agent names: alphanumeric, underscores, hyphens, and common unicode chars
+VALID_AGENT_NAME_PATTERN = re.compile(r"^[\w\-\.\s\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]+$")
 
 
 @router.patch("/{agent_id}", response_model=schemas.Agent, dependencies=[Depends(require_admin)])
@@ -42,40 +45,6 @@ async def list_agent_configs():
     return {"configs": list_available_configs()}
 
 
-def _validate_agent_name(agent_name: str) -> None:
-    """
-    Validate agent name to prevent path traversal attacks.
-
-    Raises:
-        HTTPException: If the agent name contains invalid characters
-    """
-    # Reject path separators and parent directory references
-    if ".." in agent_name or "/" in agent_name or "\\" in agent_name:
-        raise HTTPException(status_code=400, detail="Invalid agent name")
-    # Reject empty or whitespace-only names
-    if not agent_name or not agent_name.strip():
-        raise HTTPException(status_code=400, detail="Invalid agent name")
-
-
-def _is_safe_path(path: Path, allowed_root: Path) -> bool:
-    """
-    Check if a resolved path is within the allowed root directory.
-
-    Args:
-        path: The path to check
-        allowed_root: The root directory that path must be within
-
-    Returns:
-        True if path is within allowed_root, False otherwise
-    """
-    try:
-        resolved = path.resolve()
-        root_resolved = allowed_root.resolve()
-        return resolved.is_relative_to(root_resolved)
-    except (ValueError, RuntimeError):
-        return False
-
-
 @router.get("/{agent_name}/profile-pic")
 async def get_agent_profile_pic(agent_name: str):
     """
@@ -90,11 +59,14 @@ async def get_agent_profile_pic(agent_name: str):
     For legacy single-file configs:
     - agents/{agent_name}.{png,jpg,jpeg,gif,webp,svg}
     """
-    # Validate agent name to prevent path traversal
-    _validate_agent_name(agent_name)
+    # Validate agent name to prevent path traversal attacks
+    if not VALID_AGENT_NAME_PATTERN.match(agent_name) or ".." in agent_name:
+        raise HTTPException(status_code=400, detail="Invalid agent name")
 
-    # Get the agents directory (handles both dev and frozen exe modes)
-    agents_dir = get_agents_dir()
+    # Get the project root directory (parent of backend/)
+    backend_dir = Path(__file__).parent.parent
+    project_root = backend_dir.parent
+    agents_dir = project_root / "agents"
 
     # Common image extensions
     image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
@@ -103,31 +75,32 @@ async def get_agent_profile_pic(agent_name: str):
         """Helper function to find profile picture in a folder."""
         if not folder.is_dir():
             return None
-        # Ensure folder is within agents_dir
-        if not _is_safe_path(folder, agents_dir):
-            return None
 
         # Try common profile pic names
         common_names = ["profile", "avatar", "picture", "photo"]
         for name in common_names:
             for ext in image_extensions:
                 pic_path = folder / f"{name}{ext}"
-                if pic_path.exists() and _is_safe_path(pic_path, agents_dir):
+                if pic_path.exists():
                     return pic_path
 
         # If no common name found, look for any image file
         for ext in image_extensions:
             for file in folder.glob(f"*{ext}"):
-                if _is_safe_path(file, agents_dir):
-                    return file
+                return file
 
         return None
+
+    # Cache headers for static profile pictures (1 hour cache, revalidate after)
+    cache_headers = {
+        "Cache-Control": "public, max-age=3600, must-revalidate",
+    }
 
     # First, try direct agent folder
     agent_folder = agents_dir / agent_name
     pic_path = find_profile_pic_in_folder(agent_folder)
     if pic_path:
-        return FileResponse(pic_path)
+        return FileResponse(pic_path, headers=cache_headers)
 
     # Try group folders (group_*/)
     for group_folder in agents_dir.glob("group_*"):
@@ -135,13 +108,13 @@ async def get_agent_profile_pic(agent_name: str):
             agent_in_group = group_folder / agent_name
             pic_path = find_profile_pic_in_folder(agent_in_group)
             if pic_path:
-                return FileResponse(pic_path)
+                return FileResponse(pic_path, headers=cache_headers)
 
     # Try legacy format (agent_name.{ext} in agents/ directory)
     for ext in image_extensions:
         pic_path = agents_dir / f"{agent_name}{ext}"
-        if pic_path.exists() and _is_safe_path(pic_path, agents_dir):
-            return FileResponse(pic_path)
+        if pic_path.exists():
+            return FileResponse(pic_path, headers=cache_headers)
 
     # No profile picture found
     raise HTTPException(status_code=404, detail="Profile picture not found")

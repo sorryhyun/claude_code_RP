@@ -84,3 +84,32 @@ class RecallOutput(BaseModel):
     def to_tool_response(self) -> dict[str, Any]:
         """Convert to MCP tool response format."""
         return {"content": [{"type": "text", "text": self.response}]}
+
+
+# =============================================================================
+# Guideline Tool Input Models
+# =============================================================================
+
+
+class GuidelinesReadInput(BaseModel):
+    """Input model for guidelines read tool - takes no arguments."""
+
+    pass
+
+
+class GuidelinesAnthropicInput(BaseModel):
+    """Input model for guidelines anthropic tool."""
+
+    situation: str = Field(
+        ...,
+        min_length=1,
+        description="Brief description of the situation (e.g., 'Characters are talking about a detailed method for creating a chemical weapon')",
+    )
+
+    @field_validator("situation")
+    @classmethod
+    def validate_situation(cls, v: str) -> str:
+        """Ensure situation is not just whitespace."""
+        if not v.strip():
+            raise ValueError("Situation description cannot be empty or whitespace")
+        return v.strip()

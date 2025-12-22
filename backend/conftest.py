@@ -9,6 +9,7 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import AsyncGenerator
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -20,6 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import models
 from database import Base, get_db
 from main import app
+from orchestration import ChatOrchestrator
+from sdk import AgentManager
 
 
 # Configure pytest-asyncio
@@ -37,37 +40,44 @@ async def test_db() -> AsyncGenerator[AsyncSession, None]:
     """
     Create a fresh test database for each test function.
 
-    Uses PostgreSQL test database that is created and destroyed for each test.
-    Requires TEST_DATABASE_URL or DATABASE_URL environment variable.
+    Uses an in-memory SQLite database that is created and destroyed
+    for each test to ensure isolation.
     """
-    import os
+    # Use in-memory SQLite for tests
+    test_engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", echo=False, connect_args={"check_same_thread": False}
+    )
 
-    # Get test database URL from environment
-    test_db_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
-    if not test_db_url:
-        pytest.skip("TEST_DATABASE_URL or DATABASE_URL not set - skipping database tests")
+    # Create tables
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-    # Create test engine
-    test_engine = create_async_engine(test_db_url, echo=False)
+    # Create session
+    TestingSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
-    try:
-        # Create tables
-        async with test_engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    async with TestingSessionLocal() as session:
+        yield session
 
-        # Create session
-        TestingSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    # Drop tables after test
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
-        async with TestingSessionLocal() as session:
-            yield session
+    await test_engine.dispose()
 
-        # Drop tables after test
-        async with test_engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-    except Exception as e:
-        pytest.skip(f"PostgreSQL connection failed: {e}")
-    finally:
-        await test_engine.dispose()
+
+def _setup_app_state():
+    """Set up app state with mock instances for testing."""
+    if not hasattr(app.state, "agent_manager") or app.state.agent_manager is None:
+        from sdk.client_pool import ClientPool
+        app.state.agent_manager = MagicMock(spec=AgentManager)
+        app.state.agent_manager.shutdown = AsyncMock()
+        # Set up client_pool mock with necessary methods
+        app.state.agent_manager.client_pool = MagicMock(spec=ClientPool)
+        app.state.agent_manager.client_pool.remove_agent_from_room = MagicMock()
+    if not hasattr(app.state, "chat_orchestrator") or app.state.chat_orchestrator is None:
+        app.state.chat_orchestrator = MagicMock(spec=ChatOrchestrator)
+    if not hasattr(app.state, "background_scheduler") or app.state.background_scheduler is None:
+        app.state.background_scheduler = MagicMock()
 
 
 @pytest.fixture(scope="function")
@@ -78,25 +88,14 @@ async def client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     This fixture overrides the database dependency to use the test database
     and removes authentication middleware for easier testing.
     """
-    from unittest.mock import AsyncMock, Mock
+    # Set up app state
+    _setup_app_state()
 
     # Override the get_db dependency to use test database
     async def override_get_db():
         yield test_db
 
     app.dependency_overrides[get_db] = override_get_db
-
-    # Mock agent_manager and chat_orchestrator on app state
-    mock_agent_manager = Mock()
-    # Configure client_pool mock to return empty lists/dicts and async methods
-    mock_agent_manager.client_pool.get_keys_for_agent.return_value = []
-    mock_agent_manager.client_pool.cleanup = AsyncMock()
-    mock_agent_manager.cleanup_agent.return_value = None
-    app.state.agent_manager = mock_agent_manager
-
-    mock_chat_orchestrator = Mock()
-    mock_chat_orchestrator.generate_agent_response.return_value = None
-    app.state.chat_orchestrator = mock_chat_orchestrator
 
     # Create test client
     transport = ASGITransport(app=app)
@@ -105,41 +104,26 @@ async def client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 
     # Clean up
     app.dependency_overrides.clear()
-    if hasattr(app.state, "agent_manager"):
-        delattr(app.state, "agent_manager")
-    if hasattr(app.state, "chat_orchestrator"):
-        delattr(app.state, "chat_orchestrator")
 
 
 @pytest.fixture(scope="function")
-async def authenticated_client(test_db: AsyncSession, mock_env_vars) -> AsyncGenerator[tuple[AsyncClient, str], None]:
+async def authenticated_client(test_db: AsyncSession) -> AsyncGenerator[tuple[AsyncClient, str], None]:
     """
     Create a test client with a valid JWT token.
 
     Returns:
         tuple: (AsyncClient, token) - The test client and the JWT token
     """
-    from unittest.mock import AsyncMock, Mock
-
     from auth import generate_jwt_token
+
+    # Set up app state
+    _setup_app_state()
 
     # Override the get_db dependency to use test database
     async def override_get_db():
         yield test_db
 
     app.dependency_overrides[get_db] = override_get_db
-
-    # Mock agent_manager and chat_orchestrator on app state
-    mock_agent_manager = Mock()
-    # Configure client_pool mock to return empty lists/dicts and async methods
-    mock_agent_manager.client_pool.get_keys_for_agent.return_value = []
-    mock_agent_manager.client_pool.cleanup = AsyncMock()
-    mock_agent_manager.cleanup_agent.return_value = None
-    app.state.agent_manager = mock_agent_manager
-
-    mock_chat_orchestrator = Mock()
-    mock_chat_orchestrator.generate_agent_response.return_value = None
-    app.state.chat_orchestrator = mock_chat_orchestrator
 
     # Generate a valid JWT token
     token = generate_jwt_token(role="admin", user_id="admin")
@@ -151,41 +135,26 @@ async def authenticated_client(test_db: AsyncSession, mock_env_vars) -> AsyncGen
 
     # Clean up
     app.dependency_overrides.clear()
-    if hasattr(app.state, "agent_manager"):
-        delattr(app.state, "agent_manager")
-    if hasattr(app.state, "chat_orchestrator"):
-        delattr(app.state, "chat_orchestrator")
 
 
 @pytest.fixture(scope="function")
-async def guest_client(test_db: AsyncSession, mock_env_vars) -> AsyncGenerator[tuple[AsyncClient, str], None]:
+async def guest_client(test_db: AsyncSession) -> AsyncGenerator[tuple[AsyncClient, str], None]:
     """
     Create a test client with a valid guest JWT token.
 
     Returns:
         tuple: (AsyncClient, token) - The test client and the JWT token
     """
-    from unittest.mock import AsyncMock, Mock
-
     from auth import generate_jwt_token
+
+    # Set up app state
+    _setup_app_state()
 
     # Override the get_db dependency to use test database
     async def override_get_db():
         yield test_db
 
     app.dependency_overrides[get_db] = override_get_db
-
-    # Mock agent_manager and chat_orchestrator on app state
-    mock_agent_manager = Mock()
-    # Configure client_pool mock to return empty lists/dicts and async methods
-    mock_agent_manager.client_pool.get_keys_for_agent.return_value = []
-    mock_agent_manager.client_pool.cleanup = AsyncMock()
-    mock_agent_manager.cleanup_agent.return_value = None
-    app.state.agent_manager = mock_agent_manager
-
-    mock_chat_orchestrator = Mock()
-    mock_chat_orchestrator.generate_agent_response.return_value = None
-    app.state.chat_orchestrator = mock_chat_orchestrator
 
     # Generate a valid JWT token with guest role
     token = generate_jwt_token(role="guest", user_id="guest-test")
@@ -197,10 +166,6 @@ async def guest_client(test_db: AsyncSession, mock_env_vars) -> AsyncGenerator[t
 
     # Clean up
     app.dependency_overrides.clear()
-    if hasattr(app.state, "agent_manager"):
-        delattr(app.state, "agent_manager")
-    if hasattr(app.state, "chat_orchestrator"):
-        delattr(app.state, "chat_orchestrator")
 
 
 @pytest.fixture
@@ -226,16 +191,6 @@ async def sample_agent(test_db: AsyncSession) -> models.Agent:
 async def sample_room(test_db: AsyncSession) -> models.Room:
     """Create a sample room for testing."""
     room = models.Room(name="test_room", max_interactions=None, is_paused=False, owner_id="admin")
-    test_db.add(room)
-    await test_db.commit()
-    await test_db.refresh(room)
-    return room
-
-
-@pytest.fixture
-async def sample_guest_room(test_db: AsyncSession) -> models.Room:
-    """Create a sample room owned by the guest for testing."""
-    room = models.Room(name="guest_test_room", max_interactions=None, is_paused=False, owner_id="guest-test")
     test_db.add(room)
     await test_db.commit()
     await test_db.refresh(room)

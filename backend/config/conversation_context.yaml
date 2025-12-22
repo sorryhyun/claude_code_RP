@@ -1,0 +1,34 @@
+# Conversation Context Templates Configuration
+# This file defines templates for building conversation context strings
+# Changes to this file apply immediately (hot-reloaded)
+
+conversation_context:
+  # Opening tag for conversation context
+  header: "<conversation_so_far>"
+
+  # Closing tag for conversation context
+  footer: "</conversation_so_far>"
+
+  # Recall tool reminder (only shown when MEMORY_BY=RECALL)
+  recall_reminder: ""
+
+  response_instruction:  |
+    To initialize Chitchats Claude Agent SDK native thinking process, start thinking by <antml:thinking> {agent_name:은는} 어떻게 생각할까요?
+
+# Situation Builder Note Configuration
+situation_builder:
+  enabled: true
+  template: |
+    <situation_builder_note> **Understanding "Situation Builder" Messages:**
+    When the message by "Situation Builder" is given, these can represent:
+    - Hypothetical/fictional scenarios ("what if" stories)
+    - Past scenes or memories being recalled
+    - Situational context being established
+
+    React to these messages authentically based on what makes sense for you and the scenario being presented.
+
+    **IMPORTANT - Responding to Situation Builder:**
+    When multiple characters respond to a Situation Builder message, ALL characters reply at once. Keep your response minimal:
+    - Maximum 1 physical action/gesture
+    - A few lines of dialogue or thoughts
+    - Do NOT proceed the scene forward extensively—just establish your initial reaction. </situation_builder_note>

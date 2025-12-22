@@ -12,7 +12,7 @@ Uses Pydantic models for type-safe validation of inputs and outputs.
 from typing import Any, Optional
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
-from config.config_loader import get_tool_description, get_tool_input_schema, get_tool_response, is_tool_enabled
+from .config import get_tool_description, get_tool_response, is_tool_enabled
 from domain.action_models import (
     MemorizeInput,
     MemorizeOutput,
@@ -28,6 +28,7 @@ def create_action_tools(
     agent_id: Optional[int] = None,
     config_file: Optional[str] = None,
     long_term_memory_index: Optional[dict[str, str]] = None,
+    group_name: Optional[str] = None,
 ) -> list:
     """
     Create action tools (skip, memorize, recall) with descriptions loaded from YAML.
@@ -37,6 +38,7 @@ def create_action_tools(
         agent_id: The ID of the agent (for cache invalidation)
         config_file: Path to agent config folder (for memorize tool to write directly to file)
         long_term_memory_index: Optional dict mapping memory subtitles to their content
+        group_name: Optional group name to apply group-specific tool config overrides
 
     Returns:
         List of action tool functions configured with agent name
@@ -45,17 +47,16 @@ def create_action_tools(
 
     # Skip tool - agents call this to indicate they DON'T want to respond
     if is_tool_enabled("skip"):
-        skip_description = get_tool_description("skip", agent_name=agent_name)
-        skip_schema = get_tool_input_schema("skip")
+        skip_description = get_tool_description("skip", agent_name=agent_name, group_name=group_name)
 
-        @tool("skip", skip_description, skip_schema)
+        @tool("skip", skip_description, SkipInput.model_json_schema())
         async def skip_tool(_args: dict[str, Any]):
             """Tool that agents can call to indicate they want to skip/ignore the message."""
             # Validate input with Pydantic (skip takes no args, so just create empty instance)
             validated_input = SkipInput()
 
             # Get response and create validated output
-            response_text = get_tool_response("skip")
+            response_text = get_tool_response("skip", group_name=group_name)
             output = SkipOutput(response=response_text)
 
             # Return in MCP tool format
@@ -65,10 +66,9 @@ def create_action_tools(
 
     # Memorize tool - agents call this to record memories
     if is_tool_enabled("memorize"):
-        memorize_description = get_tool_description("memorize", agent_name=agent_name)
-        memorize_schema = get_tool_input_schema("memorize")
+        memorize_description = get_tool_description("memorize", agent_name=agent_name, group_name=group_name)
 
-        @tool("memorize", memorize_description, memorize_schema)
+        @tool("memorize", memorize_description, MemorizeInput.model_json_schema())
         async def memorize_tool(args: dict[str, Any]):
             """Tool that agents can call to record memories. Writes directly to recent_events.md file."""
             from datetime import datetime
@@ -88,12 +88,14 @@ def create_action_tools(
                 if success:
                     # Invalidate agent config cache since recent_events changed
                     if agent_id is not None:
-                        from utils.cache import agent_config_key, get_cache
+                        from infrastructure.cache import agent_config_key, get_cache
 
                         cache = get_cache()
                         cache.invalidate(agent_config_key(agent_id))
 
-                    response_text = get_tool_response("memorize", memory_entry=validated_input.memory_entry)
+                    response_text = get_tool_response(
+                        "memorize", group_name=group_name, memory_entry=validated_input.memory_entry
+                    )
                 else:
                     response_text = f"Failed to record memory: {validated_input.memory_entry}"
             else:
@@ -111,10 +113,11 @@ def create_action_tools(
     if is_tool_enabled("recall") and long_term_memory_index:
         # Build list of available subtitles for description
         memory_subtitles = ", ".join(f"'{s}'" for s in long_term_memory_index.keys())
-        recall_description = get_tool_description("recall", agent_name=agent_name, memory_subtitles=memory_subtitles)
-        recall_schema = get_tool_input_schema("recall")
+        recall_description = get_tool_description(
+            "recall", agent_name=agent_name, memory_subtitles=memory_subtitles, group_name=group_name
+        )
 
-        @tool("recall", recall_description, recall_schema)
+        @tool("recall", recall_description, RecallInput.model_json_schema())
         async def recall_tool(args: dict[str, Any]):
             """Tool that agents can call to retrieve detailed memories by subtitle."""
             # Validate input with Pydantic
@@ -124,7 +127,7 @@ def create_action_tools(
             memory_content = long_term_memory_index.get(validated_input.subtitle)
 
             if memory_content:
-                response_text = get_tool_response("recall", memory_content=memory_content)
+                response_text = get_tool_response("recall", group_name=group_name, memory_content=memory_content)
                 output = RecallOutput(
                     response=response_text,
                     success=True,
@@ -154,6 +157,7 @@ def create_action_mcp_server(
     agent_id: Optional[int] = None,
     config_file: Optional[str] = None,
     long_term_memory_index: Optional[dict[str, str]] = None,
+    group_name: Optional[str] = None,
 ):
     """
     Create an MCP server with action tools (skip, memorize, recall).
@@ -165,10 +169,11 @@ def create_action_mcp_server(
         agent_id: The ID of the agent (for cache invalidation)
         config_file: Path to agent config folder (for memorize tool to write directly to file)
         long_term_memory_index: Optional dict mapping memory subtitles to their content
+        group_name: Optional group name to apply group-specific tool config overrides
 
     Returns:
         MCP server instance with action tools
     """
-    action_tools = create_action_tools(agent_name, agent_id, config_file, long_term_memory_index)
+    action_tools = create_action_tools(agent_name, agent_id, config_file, long_term_memory_index, group_name)
 
     return create_sdk_mcp_server(name="action", version="1.0.0", tools=action_tools)

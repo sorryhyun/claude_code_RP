@@ -1,6 +1,6 @@
-# Claude Code Role Play Backend Tests
+# ChitChats Backend Tests
 
-Comprehensive test suite for the Claude Code Role Play backend application.
+Comprehensive test suite for the ChitChats backend application.
 
 ## Overview
 

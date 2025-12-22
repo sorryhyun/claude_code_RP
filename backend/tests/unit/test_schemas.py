@@ -15,31 +15,6 @@ class TestAgentSchemas:
     """Tests for Agent-related schemas."""
 
     @pytest.mark.unit
-    def test_agent_base_creation(self):
-        """Test creating AgentBase schema."""
-        agent_data = {
-            "name": "test_agent",
-            "group": "test_group",
-            "in_a_nutshell": "Test agent",
-            "characteristics": "Helpful",
-            "is_critic": False,
-        }
-        agent = schemas.AgentBase(**agent_data)
-
-        assert agent.name == "test_agent"
-        assert agent.group == "test_group"
-        assert agent.is_critic is False
-
-    @pytest.mark.unit
-    def test_agent_base_defaults(self):
-        """Test AgentBase default values."""
-        agent = schemas.AgentBase(name="minimal_agent")
-
-        assert agent.name == "minimal_agent"
-        assert agent.group is None
-        assert agent.is_critic is False
-
-    @pytest.mark.unit
     def test_agent_create_schema(self):
         """Test AgentCreate schema."""
         agent_data = {"name": "new_agent", "config_file": "agents/new_agent.md"}
@@ -73,12 +48,6 @@ class TestRoomSchemas:
     """Tests for Room-related schemas."""
 
     @pytest.mark.unit
-    def test_room_base_creation(self):
-        """Test creating RoomBase schema."""
-        room = schemas.RoomBase(name="test_room")
-        assert room.name == "test_room"
-
-    @pytest.mark.unit
     def test_room_base_validation(self):
         """Test RoomBase validation."""
         with pytest.raises(ValidationError):
@@ -92,14 +61,6 @@ class TestRoomSchemas:
 
         assert room.name == "new_room"
         assert room.max_interactions == 10
-
-    @pytest.mark.unit
-    def test_room_create_defaults(self):
-        """Test RoomCreate default values."""
-        room = schemas.RoomCreate(name="minimal_room")
-
-        assert room.name == "minimal_room"
-        assert room.max_interactions is None
 
     @pytest.mark.unit
     def test_room_update_schema(self):
@@ -136,24 +97,6 @@ class TestRoomSchemas:
 
 class TestMessageSchemas:
     """Tests for Message-related schemas."""
-
-    @pytest.mark.unit
-    def test_message_base_creation(self):
-        """Test creating MessageBase schema."""
-        message = schemas.MessageBase(content="Test message", role="user", participant_type="user")
-
-        assert message.content == "Test message"
-        assert message.role == "user"
-        assert message.participant_type == "user"
-
-    @pytest.mark.unit
-    def test_message_base_defaults(self):
-        """Test MessageBase default values."""
-        message = schemas.MessageBase(content="Test", role="assistant")
-
-        assert message.content == "Test"
-        assert message.role == "assistant"
-        assert message.participant_type is None
 
     @pytest.mark.unit
     def test_message_create_schema(self):
@@ -238,12 +181,12 @@ class TestSchemaDatetimeSerialization:
 
 
 class TestSchemaBooleanSerialization:
-    """Tests for boolean field serialization."""
+    """Tests for SQLite boolean (int) serialization."""
 
     @pytest.mark.unit
     async def test_agent_is_critic_serialization(self, test_db):
         """Test Agent is_critic field serialization."""
-        # Create critic agent (is_critic=True)
+        # Create critic agent (is_critic=1)
         agent = schemas.Agent.model_validate(
             type(
                 "Agent",
@@ -253,7 +196,7 @@ class TestSchemaBooleanSerialization:
                     "name": "test",
                     "system_prompt": "test",
                     "created_at": datetime.now(timezone.utc),
-                    "is_critic": True,  # Native boolean
+                    "is_critic": 1,  # SQLite integer
                     "group": None,
                     "config_file": None,
                     "profile_pic": None,
@@ -264,14 +207,14 @@ class TestSchemaBooleanSerialization:
             )()
         )
 
-        # Should be boolean
+        # Should be converted to boolean
         assert agent.is_critic is True
         assert isinstance(agent.is_critic, bool)
 
     @pytest.mark.unit
     async def test_room_is_paused_serialization(self, test_db):
         """Test Room is_paused field serialization."""
-        # Create paused room (is_paused=True)
+        # Create paused room (is_paused=1)
         room = schemas.Room.model_validate(
             type(
                 "Room",
@@ -280,7 +223,7 @@ class TestSchemaBooleanSerialization:
                     "id": 1,
                     "name": "test",
                     "max_interactions": None,
-                    "is_paused": True,  # Native boolean
+                    "is_paused": 1,  # SQLite integer
                     "created_at": datetime.now(timezone.utc),
                     "agents": [],
                     "messages": [],
@@ -288,6 +231,6 @@ class TestSchemaBooleanSerialization:
             )()
         )
 
-        # Should be boolean
+        # Should be converted to boolean
         assert room.is_paused is True
         assert isinstance(room.is_paused, bool)

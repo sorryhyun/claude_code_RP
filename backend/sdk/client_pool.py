@@ -14,17 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Tuple
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from domain.task_identifier import TaskIdentifier
 
 logger = logging.getLogger("ClientPool")
-
-# Pool configuration defaults
-DEFAULT_MAX_POOL_SIZE = 50  # Maximum number of concurrent clients
-DEFAULT_LOCK_TIMEOUT = 30.0  # Seconds to wait for connection lock
 
 
 class ClientPool:
@@ -38,53 +33,31 @@ class ClientPool:
     Pool Strategy:
         - Key: TaskIdentifier(room_id, agent_id)
         - Value: ClaudeSDKClient instance
-        - Max Size: Configurable limit to prevent resource exhaustion
-        - LRU Eviction: Oldest client evicted when pool is full
-        - Lock Timeout: Prevents deadlocks during client creation
         - Cleanup: Background disconnect to avoid cancel scope issues
+        - Concurrency: Semaphore allows up to MAX_CONCURRENT_CONNECTIONS simultaneous connections
     """
 
-    def __init__(self, max_size: int = DEFAULT_MAX_POOL_SIZE, lock_timeout: float = DEFAULT_LOCK_TIMEOUT):
-        """
-        Initialize the client pool.
+    # Allow up to 3 concurrent connections (prevents ProcessTransport issues while allowing parallelism)
+    MAX_CONCURRENT_CONNECTIONS = 10
+    # Stabilization delay after each connection (seconds)
+    CONNECTION_STABILIZATION_DELAY = 0.05
+    # Timeout for disconnect operations (seconds)
+    DISCONNECT_TIMEOUT = 5.0
 
-        Args:
-            max_size: Maximum number of clients in the pool (default: 50)
-            lock_timeout: Timeout in seconds for acquiring connection lock (default: 30.0)
-        """
+    def __init__(self):
+        """Initialize the client pool."""
         self.pool: dict[TaskIdentifier, ClaudeSDKClient] = {}
-        self._last_used: dict[TaskIdentifier, float] = {}  # Track last access time for LRU eviction
-        self._connection_lock = asyncio.Lock()
+        # Use semaphore instead of lock to allow limited concurrency
+        self._connection_semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_CONNECTIONS)
+        # Per-task_id locks to prevent duplicate client creation for the same task
+        self._task_locks: dict[TaskIdentifier, asyncio.Lock] = {}
         self._cleanup_tasks: set[asyncio.Task] = set()
-        self._max_size = max_size
-        self._lock_timeout = lock_timeout
 
-    async def _evict_lru_client(self) -> None:
-        """
-        Evict the least recently used client to make room for new ones.
-
-        Note: This method assumes it's called from within _connection_lock context.
-        The lock is held while finding LRU to prevent race conditions.
-        """
-        if not self._last_used:
-            return
-
-        # Find the oldest client (safe since we're inside _connection_lock)
-        oldest_task_id = min(self._last_used.keys(), key=lambda k: self._last_used[k])
-        logger.info(f"🗑️ Pool full ({len(self.pool)}/{self._max_size}), evicting LRU client: {oldest_task_id}")
-
-        # Inline cleanup logic to avoid releasing lock during eviction
-        if oldest_task_id not in self.pool:
-            return
-
-        client = self.pool[oldest_task_id]
-        del self.pool[oldest_task_id]
-        self._last_used.pop(oldest_task_id, None)
-
-        # Schedule disconnect in background (doesn't need lock)
-        task = asyncio.create_task(self._disconnect_client_background(client, oldest_task_id))
-        self._cleanup_tasks.add(task)
-        task.add_done_callback(self._cleanup_tasks.discard)
+    def _get_task_lock(self, task_id: TaskIdentifier) -> asyncio.Lock:
+        """Get or create a per-task_id lock."""
+        if task_id not in self._task_locks:
+            self._task_locks[task_id] = asyncio.Lock()
+        return self._task_locks[task_id]
 
     async def get_or_create(self, task_id: TaskIdentifier, options: ClaudeAgentOptions) -> Tuple[ClaudeSDKClient, bool]:
         """
@@ -98,9 +71,6 @@ class ClientPool:
             (client, is_new) tuple
             - client: ClaudeSDKClient instance
             - is_new: True if newly created, False if reused from pool
-
-        Raises:
-            asyncio.TimeoutError: If lock acquisition times out
 
         SDK Best Practice: Use lock to prevent ProcessTransport race
         conditions when creating multiple clients concurrently.
@@ -120,82 +90,82 @@ class ClientPool:
                 logger.info(
                     f"Session changed for {task_id} (old: {old_session_id}, new: {new_session_id}), recreating client"
                 )
-                await self.cleanup(task_id)
+                # Just remove from pool without calling disconnect()
+                # The SDK's disconnect() has internal cancel scopes that interfere with SQLAlchemy
+                # Let GC handle cleanup of the old client
+                self._remove_from_pool(task_id)
                 # Fall through to create new client below
             else:
                 logger.debug(f"Reusing existing client for {task_id}")
                 # Update options for the existing client (in case system prompt changed)
                 self.pool[task_id].options = options
-                # Update last used time
-                self._last_used[task_id] = time.monotonic()
                 return self.pool[task_id], False
 
-        # Use lock with timeout to prevent concurrent client creation/connection
-        # This prevents "ProcessTransport is not ready for writing" errors
-        try:
-            async with asyncio.timeout(self._lock_timeout):
-                async with self._connection_lock:
-                    # Double-check after acquiring lock (another coroutine might have created it)
-                    if task_id in self.pool:
-                        existing_client = self.pool[task_id]
-                        old_session_id = (
-                            getattr(existing_client.options, "resume", None)
-                            if hasattr(existing_client, "options")
-                            else None
-                        )
-                        new_session_id = getattr(options, "resume", None)
+        # Use per-task_id lock to prevent duplicate client creation for the same task
+        task_lock = self._get_task_lock(task_id)
+        async with task_lock:
+            # Double-check after acquiring task lock (another coroutine might have created it)
+            if task_id in self.pool:
+                existing_client = self.pool[task_id]
+                old_session_id = (
+                    getattr(existing_client.options, "resume", None) if hasattr(existing_client, "options") else None
+                )
+                new_session_id = getattr(options, "resume", None)
 
-                        # If session changed, cleanup and recreate
-                        if old_session_id != new_session_id and (
-                            old_session_id is not None or new_session_id is not None
-                        ):
-                            logger.info(f"Session changed for {task_id} while waiting for lock, recreating client")
-                            await self.cleanup(task_id)
-                            # Continue to create new client below
+                # If session changed, remove and recreate (without calling disconnect)
+                if old_session_id != new_session_id and (old_session_id is not None or new_session_id is not None):
+                    logger.info(f"Session changed for {task_id} while waiting for lock, recreating client")
+                    self._remove_from_pool(task_id)
+                    # Continue to create new client below
+                else:
+                    logger.debug(f"Client for {task_id} was created while waiting for lock")
+                    self.pool[task_id].options = options
+                    return self.pool[task_id], False
+
+            # Use semaphore to limit overall connection concurrency (prevents ProcessTransport issues)
+            async with self._connection_semaphore:
+                logger.debug(f"Creating new client for {task_id}")
+
+                # Retry connection with exponential backoff to handle ProcessTransport race conditions
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        client = ClaudeSDKClient(options=options)
+                        # Connect without a prompt - messages are sent via query() instead
+                        await client.connect()
+                        self.pool[task_id] = client
+
+                        # Brief delay to let ProcessTransport stabilize before next connection
+                        await asyncio.sleep(self.CONNECTION_STABILIZATION_DELAY)
+
+                        return client, True
+                    except Exception as e:
+                        if "ProcessTransport is not ready" in str(e) and attempt < max_retries - 1:
+                            delay = 0.3 * (2**attempt)  # Exponential backoff: 0.3s, 0.6s
+                            logger.warning(
+                                f"Connection failed for {task_id}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
+                            )
+                            await asyncio.sleep(delay)
                         else:
-                            logger.debug(f"Client for {task_id} was created while waiting for lock")
-                            self.pool[task_id].options = options
-                            self._last_used[task_id] = time.monotonic()
-                            return self.pool[task_id], False
+                            # Re-raise on final attempt or non-transport errors
+                            raise
 
-                    # Check pool size and evict LRU if needed
-                    if len(self.pool) >= self._max_size:
-                        await self._evict_lru_client()
+    def _remove_from_pool(self, task_id: TaskIdentifier):
+        """
+        Remove a client from the pool without calling disconnect.
 
-                    logger.debug(f"Creating new client for {task_id}")
+        Use this when replacing a client due to session changes.
+        The SDK's disconnect() has internal cancel scopes that can interfere
+        with SQLAlchemy operations, so we let GC handle cleanup instead.
 
-                    # Retry connection with exponential backoff to handle ProcessTransport race conditions
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            client = ClaudeSDKClient(options=options)
-                            # Connect without a prompt - messages are sent via query() instead
-                            await client.connect()
-                            self.pool[task_id] = client
-                            self._last_used[task_id] = time.monotonic()
+        Args:
+            task_id: Identifier for the client to remove
+        """
+        if task_id not in self.pool:
+            return
 
-                            # Brief delay to let ProcessTransport stabilize before next connection
-                            await asyncio.sleep(0.1)
-
-                            return client, True
-                        except Exception as e:
-                            if "ProcessTransport is not ready" in str(e) and attempt < max_retries - 1:
-                                delay = 0.5 * (2**attempt)  # Exponential backoff: 0.5s, 1s
-                                logger.warning(
-                                    f"Connection failed for {task_id}, retrying in {delay}s "
-                                    f"(attempt {attempt + 1}/{max_retries})"
-                                )
-                                await asyncio.sleep(delay)
-                            else:
-                                # Re-raise on final attempt or non-transport errors
-                                raise
-
-                    # Should not reach here, but satisfy type checker
-                    raise RuntimeError(f"Failed to create client for {task_id} after {max_retries} attempts")
-
-        except asyncio.TimeoutError:
-            logger.error(f"⏰ Timeout acquiring connection lock for {task_id} after {self._lock_timeout}s")
-            raise asyncio.TimeoutError(f"Timeout acquiring connection lock for {task_id}")
+        logger.info(f"🗑️  Removing client from pool for {task_id} (no disconnect)")
+        del self.pool[task_id]
 
     async def cleanup(self, task_id: TaskIdentifier):
         """
@@ -207,6 +177,9 @@ class ClientPool:
         SDK Best Practice: Disconnect in background task to avoid
         cancel scope issues. The cleanup happens outside the current
         async context to prevent premature cancellation.
+
+        Note: For session changes, use _remove_from_pool() instead to avoid
+        cancel scope interference with SQLAlchemy.
         """
         if task_id not in self.pool:
             return
@@ -214,9 +187,8 @@ class ClientPool:
         logger.info(f"🧹 Cleaning up client for {task_id}")
         client = self.pool[task_id]
 
-        # Remove from pool and last_used tracking
+        # Remove from pool immediately
         del self.pool[task_id]
-        self._last_used.pop(task_id, None)
 
         # Schedule disconnect in a background task (separate from HTTP request task)
         # This ensures disconnect runs in its own async context, avoiding cancel scope violations
@@ -284,44 +256,46 @@ class ClientPool:
         """
         return self.pool.keys()
 
-    def get_stats(self) -> dict:
-        """
-        Get pool statistics for monitoring.
-
-        Returns:
-            Dictionary containing pool stats:
-            - size: Current number of clients in pool
-            - max_size: Maximum pool size
-            - pending_cleanup: Number of cleanup tasks in progress
-            - lock_timeout: Lock timeout in seconds
-        """
-        return {
-            "size": len(self.pool),
-            "max_size": self._max_size,
-            "pending_cleanup": len(self._cleanup_tasks),
-            "lock_timeout": self._lock_timeout,
-        }
-
     async def _disconnect_client_background(self, client: ClaudeSDKClient, task_id: TaskIdentifier):
         """
-        Background task for client disconnection.
+        Background task for client disconnection with timeout.
 
         Isolated in separate async task to avoid cancel scope issues.
+        Uses timeout to prevent hanging disconnect operations from accumulating.
+        Uses asyncio.shield() to protect from cancellation of parent tasks.
 
         Args:
             client: The client to disconnect
             task_id: Identifier for logging purposes
         """
         try:
+            # Use shield to protect disconnect from cancellation by parent tasks
+            # This prevents CancelledError from propagating when the main task is cancelled
             if hasattr(client, "disconnect"):
-                await client.disconnect()
+                await asyncio.wait_for(
+                    asyncio.shield(client.disconnect()),
+                    timeout=self.DISCONNECT_TIMEOUT,
+                )
                 logger.debug(f"Disconnected client for {task_id}")
             elif hasattr(client, "close"):
-                await client.close()
+                await asyncio.wait_for(
+                    asyncio.shield(client.close()),
+                    timeout=self.DISCONNECT_TIMEOUT,
+                )
                 logger.debug(f"Closed client for {task_id}")
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout disconnecting client {task_id} (>{self.DISCONNECT_TIMEOUT}s)")
+        except asyncio.CancelledError:
+            # CancelledError is expected when parent task is cancelled
+            # Just log and suppress - the client may already be disconnected
+            logger.debug(f"Disconnect cancelled for {task_id} (parent task cancelled)")
         except Exception as e:
-            # Suppress cancel scope errors - these can still happen if the client's
-            # internal state is tied to a completed task
+            # Suppress cancel scope errors and connection-related errors
+            # These can happen if the client's internal state is tied to a completed task
             error_msg = str(e).lower()
-            if "cancel scope" not in error_msg and "cancelled" not in error_msg:
+            if (
+                "cancel scope" not in error_msg
+                and "cancelled" not in error_msg
+                and "no active connection" not in error_msg
+            ):
                 logger.warning(f"Error disconnecting client {task_id}: {e}")

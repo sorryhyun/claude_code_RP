@@ -18,7 +18,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from orchestration import ChatOrchestrator
 from sdk import AgentManager
 from services.agent_service import clear_room_messages_with_cleanup, delete_room_with_cleanup
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
@@ -41,13 +40,13 @@ async def create_room(
     try:
         owner_id = "admin" if identity.role == "admin" else identity.user_id
         return await crud.create_room(db, room, owner_id=owner_id)
-    except IntegrityError as e:
-        # Check for unique constraint violation on room name
-        error_str = str(e.orig) if e.orig else str(e)
-        if "rooms.owner_id" in error_str or "rooms.name" in error_str:
-            raise RoomAlreadyExistsError(room.name)
-        raise HTTPException(status_code=500, detail="Database constraint violation")
     except Exception as e:
+        error_message = str(e)
+        if (
+            "UNIQUE constraint failed: rooms.owner_id, rooms.name" in error_message
+            or "UNIQUE constraint failed: rooms.name" in error_message
+        ):
+            raise RoomAlreadyExistsError(room.name)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -95,7 +94,8 @@ async def pause_room(
         raise HTTPException(status_code=404, detail="Room not found")
 
     # Interrupt any agents currently processing responses in this room
-    await chat_orchestrator.interrupt_room_processing(room_id, agent_manager)
+    # Pass db to save any partial responses that were in-progress
+    await chat_orchestrator.interrupt_room_processing(room_id, agent_manager, db=db)
 
     return room
 

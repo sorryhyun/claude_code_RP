@@ -5,10 +5,10 @@ This module provides the AgentManager class and related utilities for
 managing agent lifecycle, response generation, and debugging.
 """
 
-from utils.debug_utils import format_message_for_debug
+from infrastructure.logging.formatters import format_message_for_debug
 
+from .action_tools import create_action_mcp_server
 from .manager import AgentManager
-from .tools import create_action_mcp_server
 
 __all__ = [
     "AgentManager",

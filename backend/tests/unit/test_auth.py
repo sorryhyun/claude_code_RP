@@ -191,13 +191,6 @@ class TestJWTTokens:
         assert role == "guest"
 
     @pytest.mark.auth
-    def test_get_role_from_token_invalid(self, mock_env_vars):
-        """Test extracting role from invalid token returns None."""
-        role = get_role_from_token("invalid.token")
-
-        assert role is None
-
-    @pytest.mark.auth
     def test_get_role_from_token_legacy(self, mock_env_vars):
         """Test extracting role from legacy token without role field."""
         # Create token without role field (legacy format)

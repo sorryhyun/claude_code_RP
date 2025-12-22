@@ -6,7 +6,7 @@ whether a word ends with a consonant (받침) or vowel.
 """
 
 import pytest
-from utils.korean_particles import format_with_particles, has_final_consonant
+from i18n.korean import format_with_particles, has_final_consonant
 
 
 class TestHasFinalConsonant:

@@ -1,39 +1,11 @@
-import { useState } from 'react';
-import {
-  Hash,
-  Copy,
-  Check,
-  Pencil,
-  Users,
-  ChevronLeft,
-  ChevronRight,
-  Play,
-  Pause,
-  Trash2,
-  MoreVertical,
-  RefreshCw,
-  Settings,
-} from 'lucide-react';
 import type { Room, Message } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
-import { useToast } from '../../contexts/ToastContext';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { RoomTitleEditor } from './header/RoomTitleEditor';
+import { ConversationCopyButton } from './header/ConversationCopyButton';
+import { ConnectionStatus } from './header/ConnectionStatus';
+import { RoomBadges } from './header/RoomBadges';
+import { AgentPanelToggle } from './header/AgentPanelToggle';
+import { RoomControls } from './header/RoomControls';
 
 interface ChatHeaderProps {
   roomName: string;
@@ -49,6 +21,8 @@ interface ChatHeaderProps {
   onShowAgentManager: () => void;
   isAgentManagerCollapsed: boolean;
   onToggleAgentManagerCollapse: () => void;
+  isSidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 export const ChatHeader = ({
@@ -65,361 +39,95 @@ export const ChatHeader = ({
   onShowAgentManager,
   isAgentManagerCollapsed,
   onToggleAgentManagerCollapse,
+  isSidebarCollapsed,
+  onToggleSidebar,
 }: ChatHeaderProps) => {
   const { isAdmin } = useAuth();
-  const { addToast } = useToast();
-  const [isEditingLimit, setIsEditingLimit] = useState(false);
-  const [limitInput, setLimitInput] = useState('');
-  const [copiedConversation, setCopiedConversation] = useState(false);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState('');
-  const [isSavingName, setIsSavingName] = useState(false);
 
-  const startEditingLimit = () => {
-    setLimitInput(roomData?.max_interactions?.toString() || '');
-    setIsEditingLimit(true);
-  };
-
-  const handleLimitUpdate = () => {
-    const newLimit = limitInput === '' ? null : parseInt(limitInput, 10);
-    if (limitInput !== '' && (isNaN(newLimit as number) || (newLimit as number) < 1)) {
-      addToast('Please enter a valid positive number or leave empty for unlimited', 'error');
-      return;
-    }
-    onLimitUpdate(newLimit);
-    addToast('Interaction limit updated', 'success');
-    setIsEditingLimit(false);
-    setLimitInput('');
-  };
-
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
-  };
-
-  const copyConversation = async () => {
-    try {
-      const realMessages = messages.filter(m => !m.is_typing && !m.is_chatting);
-
-      if (realMessages.length === 0) {
-        addToast('No messages to copy yet', 'info');
-        return;
-      }
-
-      let transcript = `=== ${roomName} ===\n`;
-      transcript += `Conversation Transcript\n`;
-      transcript += `Total Messages: ${realMessages.length}\n`;
-      transcript += `Exported: ${new Date().toLocaleString()}\n`;
-      transcript += `${'='.repeat(60)}\n\n`;
-
-      realMessages.forEach((message) => {
-        const timestamp = formatTimestamp(message.timestamp);
-        let sender = 'Unknown';
-
-        if (message.role === 'user') {
-          if (message.participant_type === 'character' && message.participant_name) {
-            sender = message.participant_name;
-          } else if (message.participant_type === 'situation_builder') {
-            sender = 'Situation Builder';
-          } else {
-            sender = 'User';
-          }
-        } else if (message.agent_name) {
-          sender = message.agent_name;
-        }
-
-        transcript += `[${timestamp}] ${sender}:\n`;
-        transcript += `${message.content}\n\n`;
-      });
-
-      transcript += `${'='.repeat(60)}\n`;
-      transcript += `End of conversation\n`;
-
-      await navigator.clipboard.writeText(transcript);
-      setCopiedConversation(true);
-      setTimeout(() => setCopiedConversation(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy conversation:', err);
-      addToast('Failed to copy conversation', 'error');
-    }
-  };
-
-  const startEditingName = () => {
-    setNameInput(roomName);
-    setIsEditingName(true);
-  };
-
-  const handleRenameRoom = async () => {
-    if (!nameInput.trim()) {
-      addToast('Room name cannot be empty', 'error');
-      return;
-    }
-
-    try {
-      setIsSavingName(true);
-      await onRenameRoom(nameInput.trim());
-      setIsEditingName(false);
-      setNameInput('');
-      addToast('Room name updated', 'success');
-    } catch (err) {
-      console.error('Failed to rename room:', err);
-      addToast('Failed to rename room', 'error');
-    } finally {
-      setIsSavingName(false);
-    }
-  };
+  // Add left padding on desktop when sidebar is collapsed to avoid hamburger overlap
+  // Use ! modifier to override header-padding-mobile which sets pl-4 at lg breakpoint
+  const sidebarCollapsedPadding = isSidebarCollapsed ? 'lg:!pl-16' : '';
 
   return (
-    <TooltipProvider>
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border pl-16 pr-3 sm:px-4 lg:px-6 py-3">
-        <div className="flex items-center justify-between gap-3">
-          {/* Left side: Room info */}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              {isEditingName ? (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Input
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    className="h-8 w-48"
-                    maxLength={60}
-                    autoFocus
-                  />
-                  <Button
-                    onClick={handleRenameRoom}
-                    disabled={isSavingName}
-                    size="sm"
-                  >
-                    {isSavingName ? 'Saving...' : 'Save'}
-                  </Button>
-                  <Button
-                    onClick={() => setIsEditingName(false)}
-                    disabled={isSavingName}
-                    variant="ghost"
-                    size="sm"
-                  >
-                    Cancel
-                  </Button>
-                </div>
+    <div className={`sticky top-0 z-10 bg-white/80 backdrop-blur-md supports-[backdrop-filter]:bg-white/60 header-padding-mobile shadow-sm pt-12 lg:pt-2 border-b border-slate-300/50 overflow-hidden select-none ${sidebarCollapsedPadding}`}>
+      <div className="flex items-center justify-between gap-1 sm:gap-2 pb-2 min-w-0">
+        {/* Room Title - Truncate on mobile */}
+        <div className="min-w-0 flex-1">
+          <RoomTitleEditor
+            roomName={roomName}
+            isAdmin={isAdmin}
+            onRenameRoom={onRenameRoom}
+          />
+
+          {/* Info Row - Only show on larger screens */}
+          <div className="hidden sm:flex items-center gap-mobile mt-1 flex-wrap">
+            <ConnectionStatus isConnected={isConnected} />
+            <RoomBadges roomName={roomName} isPaused={roomData?.is_paused || false} />
+            <ConversationCopyButton roomName={roomName} messages={messages} />
+          </div>
+        </div>
+
+        {/* Right Controls - Single row on mobile, stacked on larger screens */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Mobile: Show only essential controls */}
+          <div className="flex sm:hidden items-center gap-1">
+            <button
+              onClick={onShowAgentManager}
+              className="btn-icon-mobile text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Show agents"
+            >
+              <svg className="icon-mobile" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </button>
+            <button
+              onClick={onClearMessages}
+              className="btn-icon-mobile text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              title="Reset conversation"
+            >
+              <svg className="icon-mobile" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+            <button
+              onClick={onPauseToggle}
+              className={`btn-icon-mobile rounded-lg transition-colors ${
+                roomData?.is_paused
+                  ? 'bg-green-50 hover:bg-green-100 text-green-600'
+                  : 'bg-orange-50 hover:bg-orange-100 text-orange-600'
+              }`}
+              title={roomData?.is_paused ? 'Resume' : 'Pause'}
+            >
+              {roomData?.is_paused ? (
+                <svg className="icon-mobile" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
               ) : (
-                <>
-                  <Hash className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                  <h2 className="text-base sm:text-lg font-semibold text-foreground truncate">
-                    {roomName}
-                  </h2>
-                  {isAdmin && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          onClick={startEditingName}
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Rename room</TooltipContent>
-                    </Tooltip>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        onClick={copyConversation}
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                      >
-                        {copiedConversation ? (
-                          <Check className="w-3.5 h-3.5 text-accent" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Copy transcript</TooltipContent>
-                  </Tooltip>
-                </>
+                <svg className="icon-mobile" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                </svg>
               )}
-
-              {/* Badges */}
-              {roomName.startsWith('Direct:') && (
-                <Badge variant="secondary" className="bg-accent/20 text-accent-foreground">
-                  Direct
-                </Badge>
-              )}
-              {roomData?.is_paused && (
-                <Badge variant="secondary" className="bg-destructive/20 text-destructive">
-                  Paused
-                </Badge>
-              )}
-            </div>
-
-            {/* Connection status */}
-            <div className="flex items-center gap-2 mt-1">
-              <span className={cn(
-                'w-2 h-2 rounded-full',
-                isConnected ? 'bg-accent' : 'bg-destructive'
-              )} />
-              <span className="text-xs text-muted-foreground">
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </span>
-            </div>
+            </button>
           </div>
 
-          {/* Right side: Actions */}
-          <div className="flex items-center gap-1">
-            {/* Agents button (mobile/tablet) */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={onShowAgentManager}
-                  variant="ghost"
-                  size="icon"
-                  className="xl:hidden"
-                >
-                  <Users className="w-5 h-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Show agents</TooltipContent>
-            </Tooltip>
-
-            {/* Collapse/expand agent panel (desktop) */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={onToggleAgentManagerCollapse}
-                  variant="ghost"
-                  size="icon"
-                  className="hidden xl:flex"
-                >
-                  {isAgentManagerCollapsed ? (
-                    <ChevronLeft className="w-5 h-5" />
-                  ) : (
-                    <ChevronRight className="w-5 h-5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {isAgentManagerCollapsed ? 'Show agent panel' : 'Hide agent panel'}
-              </TooltipContent>
-            </Tooltip>
-
-            {/* Pause/Resume */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={onPauseToggle}
-                  variant={roomData?.is_paused ? 'default' : 'secondary'}
-                  size="sm"
-                  className={cn(
-                    'gap-1.5',
-                    roomData?.is_paused
-                      ? 'bg-accent hover:bg-accent/90'
-                      : 'bg-destructive/90 hover:bg-destructive text-destructive-foreground'
-                  )}
-                >
-                  {roomData?.is_paused ? (
-                    <>
-                      <Play className="w-4 h-4" />
-                      <span className="hidden sm:inline">Resume</span>
-                    </>
-                  ) : (
-                    <>
-                      <Pause className="w-4 h-4" />
-                      <span className="hidden sm:inline">Pause</span>
-                    </>
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {roomData?.is_paused ? 'Resume conversation' : 'Pause conversation'}
-              </TooltipContent>
-            </Tooltip>
-
-            {/* Clear history (admin only) */}
-            {isAdmin && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={onClearMessages}
-                    variant="destructive"
-                    size="sm"
-                    className="gap-1.5"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span className="hidden sm:inline">Clear</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Clear conversation</TooltipContent>
-              </Tooltip>
-            )}
-
-            {/* More options dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <MoreVertical className="w-5 h-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                {isEditingLimit ? (
-                  <div className="px-3 py-2">
-                    <label className="block text-xs font-medium text-muted-foreground mb-2">
-                      Message Limit
-                    </label>
-                    <div className="flex gap-2">
-                      <Input
-                        type="number"
-                        value={limitInput}
-                        onChange={(e) => setLimitInput(e.target.value)}
-                        placeholder="∞"
-                        className="h-8"
-                        min="1"
-                        autoFocus
-                      />
-                      <Button size="sm" onClick={handleLimitUpdate}>
-                        <Check className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setIsEditingLimit(false)}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <DropdownMenuItem onClick={startEditingLimit}>
-                    <Settings className="w-4 h-4 mr-2" />
-                    <span className="flex-1">Message Limit</span>
-                    <span className="text-xs font-semibold text-primary">
-                      {roomData?.max_interactions ?? '∞'}
-                    </span>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={onRefreshMessages}
-                  disabled={isRefreshing}
-                >
-                  <RefreshCw className={cn('w-4 h-4 mr-2', isRefreshing && 'animate-spin')} />
-                  Refresh Messages
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {/* Desktop: Show all controls in columns */}
+          <div className="hidden sm:flex flex-col items-end gap-1">
+            <AgentPanelToggle
+              isAgentManagerCollapsed={isAgentManagerCollapsed}
+              onShowAgentManager={onShowAgentManager}
+              onToggleAgentManagerCollapse={onToggleAgentManagerCollapse}
+              onClearMessages={onClearMessages}
+            />
+            <RoomControls
+              roomData={roomData}
+              isRefreshing={isRefreshing}
+              onRefreshMessages={onRefreshMessages}
+              onPauseToggle={onPauseToggle}
+              onLimitUpdate={onLimitUpdate}
+            />
           </div>
         </div>
       </div>
-    </TooltipProvider>
+    </div>
   );
 };

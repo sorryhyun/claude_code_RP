@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from domain.task_identifier import TaskIdentifier
+from orchestration.critic import process_critic_feedback
 from orchestration.orchestrator import MAX_FOLLOW_UP_ROUNDS, MAX_TOTAL_MESSAGES, ChatOrchestrator
 
 
@@ -146,8 +147,8 @@ class TestCleanupRoomState:
         with patch.object(orchestrator, "interrupt_room_processing", new=AsyncMock()) as mock_interrupt:
             await orchestrator.cleanup_room_state(1, mock_manager)
 
-            # Should interrupt processing
-            mock_interrupt.assert_awaited_once_with(1, mock_manager)
+            # Should interrupt processing (with save_partial_responses=False for cleanup)
+            mock_interrupt.assert_awaited_once_with(1, mock_manager, save_partial_responses=False)
 
         # Should remove from tracking dicts
         assert 1 not in orchestrator.active_room_tasks
@@ -167,39 +168,6 @@ class TestCleanupRoomState:
 
         # Should not raise errors
         assert 1 not in orchestrator.last_user_message_time
-
-
-class TestCountAgentMessages:
-    """Tests for _count_agent_messages method."""
-
-    @pytest.mark.asyncio
-    async def test_count_agent_messages(self):
-        """Test counting agent messages in a room."""
-        orchestrator = ChatOrchestrator()
-        mock_db = AsyncMock()
-
-        # Mock database response
-        mock_result = Mock()
-        mock_result.scalar.return_value = 15
-        mock_db.execute.return_value = mock_result
-
-        count = await orchestrator._count_agent_messages(mock_db, 1)
-
-        assert count == 15
-
-    @pytest.mark.asyncio
-    async def test_count_agent_messages_returns_zero_when_none(self):
-        """Test that None result returns 0."""
-        orchestrator = ChatOrchestrator()
-        mock_db = AsyncMock()
-
-        mock_result = Mock()
-        mock_result.scalar.return_value = None
-        mock_db.execute.return_value = mock_result
-
-        count = await orchestrator._count_agent_messages(mock_db, 1)
-
-        assert count == 0
 
 
 class TestHandleUserMessage:
@@ -289,8 +257,8 @@ class TestHandleUserMessage:
                 agent_manager=mock_agent_manager,
             )
 
-            # Should interrupt existing processing
-            mock_interrupt.assert_awaited_once_with(1, mock_agent_manager)
+            # Should interrupt existing processing (with db for saving partial responses)
+            mock_interrupt.assert_awaited_once_with(1, mock_agent_manager, db=mock_db)
 
     @pytest.mark.asyncio
     async def test_handle_user_message_records_timestamp(self):
@@ -322,57 +290,58 @@ class TestHandleUserMessage:
 
 
 class TestProcessAgentResponses:
-    """Tests for _process_agent_responses method."""
+    """Tests for _process_agent_responses method with tape-based scheduling."""
 
     @pytest.mark.asyncio
-    async def test_process_agent_responses_skips_paused_room(self):
-        """Test that paused rooms are skipped."""
-        orchestrator = ChatOrchestrator()
-        mock_db = AsyncMock()
-        mock_orch_context = Mock(db=mock_db, room_id=1)
-
-        # Mock paused room
-        paused_room = Mock(is_paused=True)
-
-        with patch("orchestration.orchestrator.crud.get_room_cached", return_value=paused_room):
-            await orchestrator._process_agent_responses(
-                orch_context=mock_orch_context,
-                agents=[],
-                interrupt_agents=[],
-                critic_agents=[],
-                user_message_content="Hello",
-            )
-
-            # Should exit early without processing
-            # (no other mocks should be called)
-
-    @pytest.mark.asyncio
-    async def test_process_agent_responses_calls_initial_responses(self):
-        """Test that initial agent responses are called."""
+    async def test_process_agent_responses_uses_tape_system(self):
+        """Test that tape-based scheduling is used for agent responses."""
         orchestrator = ChatOrchestrator()
         mock_db = AsyncMock()
         mock_agent_manager = AsyncMock()
         mock_orch_context = Mock(db=mock_db, room_id=1, agent_manager=mock_agent_manager)
 
-        # Mock active room with one agent
-        active_room = Mock(is_paused=False, max_interactions=None)
-        mock_agent = Mock(id=1, name="Alice", is_critic=False)
+        # Mock agents with required attributes
+        mock_agent1 = Mock(id=1, name="Alice", priority=0, interrupt_every_turn=0, transparent=0)
+        mock_agent2 = Mock(id=2, name="Bob", priority=0, interrupt_every_turn=0, transparent=0)
+
+        # Mock tape execution result
+        mock_result = Mock(
+            was_paused=False,
+            was_interrupted=False,
+            reached_limit=False,
+            all_skipped=False,
+            total_responses=2,
+        )
 
         with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(orchestrator, "_initial_agent_responses", return_value=1) as mock_initial,
-            patch.object(orchestrator, "_follow_up_rounds", new=AsyncMock()) as mock_follow_up,
+            patch("orchestration.orchestrator.TapeGenerator") as mock_generator_class,
+            patch("orchestration.orchestrator.TapeExecutor") as mock_executor_class,
         ):
+            mock_generator = Mock()
+            mock_tape = Mock()
+            mock_generator.generate_initial_round.return_value = mock_tape
+            mock_generator.generate_follow_up_round.return_value = mock_tape
+            mock_generator_class.return_value = mock_generator
+
+            mock_executor = Mock()
+            mock_executor.execute = AsyncMock(return_value=mock_result)
+            mock_executor_class.return_value = mock_executor
+
             await orchestrator._process_agent_responses(
                 orch_context=mock_orch_context,
-                agents=[mock_agent],
+                agents=[mock_agent1, mock_agent2],
                 interrupt_agents=[],
                 critic_agents=[],
                 user_message_content="Hello",
             )
 
-            # Should call initial responses
-            mock_initial.assert_awaited_once()
+            # Should create tape generator and executor
+            mock_generator_class.assert_called_once()
+            mock_executor_class.assert_called_once()
+
+            # Should generate and execute initial tape
+            mock_generator.generate_initial_round.assert_called_once()
+            mock_executor.execute.assert_called()
 
     @pytest.mark.asyncio
     async def test_process_agent_responses_skips_follow_up_with_one_agent(self):
@@ -382,14 +351,31 @@ class TestProcessAgentResponses:
         mock_agent_manager = AsyncMock()
         mock_orch_context = Mock(db=mock_db, room_id=1, agent_manager=mock_agent_manager)
 
-        active_room = Mock(is_paused=False, max_interactions=None)
-        mock_agent = Mock(id=1, name="Alice")
+        # Single agent
+        mock_agent = Mock(id=1, name="Alice", priority=0, interrupt_every_turn=0, transparent=0)
+
+        # Initial round succeeds, but only 1 agent
+        mock_result = Mock(
+            was_paused=False,
+            was_interrupted=False,
+            reached_limit=False,
+            all_skipped=False,
+            total_responses=1,
+        )
 
         with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(orchestrator, "_initial_agent_responses", return_value=1),
-            patch.object(orchestrator, "_follow_up_rounds", new=AsyncMock()) as mock_follow_up,
+            patch("orchestration.orchestrator.TapeGenerator") as mock_generator_class,
+            patch("orchestration.orchestrator.TapeExecutor") as mock_executor_class,
         ):
+            mock_generator = Mock()
+            mock_tape = Mock()
+            mock_generator.generate_initial_round.return_value = mock_tape
+            mock_generator_class.return_value = mock_generator
+
+            mock_executor = Mock()
+            mock_executor.execute = AsyncMock(return_value=mock_result)
+            mock_executor_class.return_value = mock_executor
+
             await orchestrator._process_agent_responses(
                 orch_context=mock_orch_context,
                 agents=[mock_agent],  # Only one agent
@@ -398,26 +384,43 @@ class TestProcessAgentResponses:
                 user_message_content="Hello",
             )
 
-            # Should NOT call follow-up rounds with single agent
-            mock_follow_up.assert_not_awaited()
+            # Should only call initial round, not follow-up rounds
+            mock_generator.generate_initial_round.assert_called_once()
+            mock_generator.generate_follow_up_round.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_agent_responses_processes_critics(self):
-        """Test that critic agents are processed."""
+        """Test that critic agents are processed after tape execution."""
         orchestrator = ChatOrchestrator()
         mock_db = AsyncMock()
         mock_agent_manager = AsyncMock()
         mock_orch_context = Mock(db=mock_db, room_id=1, agent_manager=mock_agent_manager)
 
-        active_room = Mock(is_paused=False, max_interactions=None)
-        mock_agent = Mock(id=1, name="Alice")
+        mock_agent = Mock(id=1, name="Alice", priority=0, interrupt_every_turn=0, transparent=0)
         mock_critic = Mock(id=2, name="Critic", is_critic=True)
 
+        mock_result = Mock(
+            was_paused=False,
+            was_interrupted=False,
+            reached_limit=False,
+            all_skipped=False,
+            total_responses=1,
+        )
+
         with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(orchestrator, "_initial_agent_responses", return_value=1),
-            patch.object(orchestrator, "_process_critic_feedback", new=AsyncMock()) as mock_critics,
+            patch("orchestration.orchestrator.TapeGenerator") as mock_generator_class,
+            patch("orchestration.orchestrator.TapeExecutor") as mock_executor_class,
+            patch("orchestration.orchestrator.process_critic_feedback", new=AsyncMock()) as mock_critics,
         ):
+            mock_generator = Mock()
+            mock_tape = Mock()
+            mock_generator.generate_initial_round.return_value = mock_tape
+            mock_generator_class.return_value = mock_generator
+
+            mock_executor = Mock()
+            mock_executor.execute = AsyncMock(return_value=mock_result)
+            mock_executor_class.return_value = mock_executor
+
             await orchestrator._process_agent_responses(
                 orch_context=mock_orch_context,
                 agents=[mock_agent],
@@ -430,206 +433,50 @@ class TestProcessAgentResponses:
             mock_critics.assert_awaited_once()
 
 
-class TestInitialAgentResponses:
-    """Tests for _initial_agent_responses method."""
-
-    @pytest.mark.asyncio
-    async def test_initial_agent_responses_concurrent_execution(self):
-        """Test that agents respond concurrently."""
-        orchestrator = ChatOrchestrator()
-        mock_db = AsyncMock()
-        mock_orch_context = Mock(db=mock_db, room_id=1)
-
-        # Mock active room
-        active_room = Mock(is_paused=False)
-
-        # Create multiple mock agents (without priority)
-        agents = [Mock(id=i, name=f"Agent{i}", priority=0, transparent=False) for i in range(3)]
-
-        with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(
-                orchestrator.response_generator, "generate_response", new=AsyncMock(return_value=True)
-            ) as mock_generate,
-        ):
-            total = await orchestrator._initial_agent_responses(
-                orch_context=mock_orch_context,
-                agents=agents,
-                interrupt_agents=[],
-                user_message_content="Hello",
-                total_messages=0,
-            )
-
-            # Should have called generate_response for each agent
-            assert mock_generate.await_count == 3
-
-            # Should return count of responses
-            assert total == 3
-
-    @pytest.mark.asyncio
-    async def test_initial_agent_responses_counts_only_real_responses(self):
-        """Test that skipped responses are not counted."""
-        orchestrator = ChatOrchestrator()
-        mock_db = AsyncMock()
-        mock_orch_context = Mock(db=mock_db, room_id=1)
-
-        active_room = Mock(is_paused=False)
-        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False), Mock(id=3, priority=0, transparent=False)]
-
-        # Mock some agents skipping
-        async def mock_generate(orch_context, agent, user_message_content):
-            # Agent 2 skips
-            return agent.id != 2
-
-        with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(orchestrator.response_generator, "generate_response", side_effect=mock_generate),
-        ):
-            total = await orchestrator._initial_agent_responses(
-                orch_context=mock_orch_context,
-                agents=agents,
-                interrupt_agents=[],
-                user_message_content="Hello",
-                total_messages=0,
-            )
-
-            # Should count only 2 responses (agent 2 skipped)
-            assert total == 2
-
-
-class TestFollowUpRounds:
-    """Tests for _follow_up_rounds method."""
-
-    @pytest.mark.asyncio
-    async def test_follow_up_rounds_respects_max_rounds(self):
-        """Test that follow-up rounds respect max limit."""
-        orchestrator = ChatOrchestrator(max_follow_up_rounds=2)
-        mock_db = AsyncMock()
-        mock_orch_context = Mock(db=mock_db, room_id=1)
-
-        active_room = Mock(is_paused=False, max_interactions=None)
-        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False)]
-
-        call_count = 0
-
-        async def mock_generate(orch_context, agent, user_message_content):
-            nonlocal call_count
-            call_count += 1
-            # Always respond to create multiple rounds
-            return True
-
-        with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(orchestrator, "_count_agent_messages", return_value=0),
-            patch.object(orchestrator.response_generator, "generate_response", side_effect=mock_generate),
-        ):
-            await orchestrator._follow_up_rounds(
-                orch_context=mock_orch_context, agents=agents, interrupt_agents=[], total_messages=0
-            )
-
-            # Should have run 2 rounds with 2 agents each = 4 calls
-            assert call_count == 4
-
-    @pytest.mark.asyncio
-    async def test_follow_up_rounds_stops_when_no_responses(self):
-        """Test that follow-up rounds stop when no agent responds."""
-        orchestrator = ChatOrchestrator(max_follow_up_rounds=10)
-        mock_db = AsyncMock()
-        mock_orch_context = Mock(db=mock_db, room_id=1)
-
-        active_room = Mock(is_paused=False, max_interactions=None)
-        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False)]
-
-        with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(orchestrator, "_count_agent_messages", return_value=0),
-            patch.object(orchestrator.response_generator, "generate_response", return_value=False),
-        ):  # All skip
-            await orchestrator._follow_up_rounds(
-                orch_context=mock_orch_context, agents=agents, interrupt_agents=[], total_messages=0
-            )
-
-            # Should stop after first round where all agents skipped
-            # No assertion needed - test passes if it completes without hanging
-
-    @pytest.mark.asyncio
-    async def test_follow_up_rounds_respects_max_interactions(self):
-        """Test that follow-up rounds respect room max_interactions limit."""
-        orchestrator = ChatOrchestrator()
-        mock_db = AsyncMock()
-        mock_orch_context = Mock(db=mock_db, room_id=1)
-
-        # Room has max 5 interactions, and already has 4
-        active_room = Mock(is_paused=False, max_interactions=5)
-        agents = [Mock(id=1, priority=0, transparent=False), Mock(id=2, priority=0, transparent=False)]
-
-        call_count = 0
-        message_count = 4  # Start with 4 messages
-
-        # Mock that dynamically updates count as messages are added
-        async def mock_count_messages(db, room_id):
-            return message_count
-
-        async def mock_generate(orch_context, agent, user_message_content):
-            nonlocal call_count, message_count
-            call_count += 1
-            message_count += 1  # Simulate database update
-            return True
-
-        with (
-            patch("orchestration.orchestrator.crud.get_room_cached", return_value=active_room),
-            patch.object(orchestrator, "_count_agent_messages", side_effect=mock_count_messages),
-            patch.object(orchestrator.response_generator, "generate_response", side_effect=mock_generate),
-        ):
-            await orchestrator._follow_up_rounds(
-                orch_context=mock_orch_context, agents=agents, interrupt_agents=[], total_messages=0
-            )
-
-            # Should only allow 1 more message (to reach limit of 5)
-            assert call_count == 1
-
-
 class TestProcessCriticFeedback:
-    """Tests for _process_critic_feedback method."""
+    """Tests for process_critic_feedback function."""
 
     @pytest.mark.asyncio
     async def test_process_critic_feedback_concurrent(self):
         """Test that critics process concurrently."""
-        orchestrator = ChatOrchestrator()
         mock_orch_context = Mock()
+        mock_response_generator = Mock()
+        mock_response_generator.generate_response = AsyncMock(return_value=True)
 
         critics = [Mock(id=i, name=f"Critic{i}") for i in range(3)]
 
-        with patch.object(
-            orchestrator.response_generator, "generate_response", new=AsyncMock(return_value=True)
-        ) as mock_generate:
-            await orchestrator._process_critic_feedback(
-                orch_context=mock_orch_context, critic_agents=critics, user_message_content="Hello"
-            )
+        await process_critic_feedback(
+            orch_context=mock_orch_context,
+            critic_agents=critics,
+            user_message_content="Hello",
+            response_generator=mock_response_generator,
+        )
 
-            # Should call generate_response for each critic with is_critic=True
-            assert mock_generate.await_count == 3
+        # Should call generate_response for each critic with is_critic=True
+        assert mock_response_generator.generate_response.await_count == 3
 
-            # Verify is_critic flag was set
-            for call in mock_generate.await_args_list:
-                assert call[1]["is_critic"] is True
+        # Verify is_critic flag was set
+        for call in mock_response_generator.generate_response.await_args_list:
+            assert call[1]["is_critic"] is True
 
     @pytest.mark.asyncio
     async def test_process_critic_feedback_handles_errors(self):
         """Test that critic errors don't stop other critics."""
-        orchestrator = ChatOrchestrator()
         mock_orch_context = Mock()
+        mock_response_generator = Mock()
 
         critics = [Mock(id=1, name="Critic1"), Mock(id=2, name="Critic2")]
 
         # First critic raises error, second succeeds
-        mock_generate = AsyncMock(side_effect=[Exception("Critic error"), True])
+        mock_response_generator.generate_response = AsyncMock(side_effect=[Exception("Critic error"), True])
 
-        with patch.object(orchestrator.response_generator, "generate_response", mock_generate):
-            # Should not raise exception
-            await orchestrator._process_critic_feedback(
-                orch_context=mock_orch_context, critic_agents=critics, user_message_content="Hello"
-            )
+        # Should not raise exception
+        await process_critic_feedback(
+            orch_context=mock_orch_context,
+            critic_agents=critics,
+            user_message_content="Hello",
+            response_generator=mock_response_generator,
+        )
 
-            # Both critics should have been processed
-            assert mock_generate.await_count == 2
+        # Both critics should have been processed
+        assert mock_response_generator.generate_response.await_count == 2

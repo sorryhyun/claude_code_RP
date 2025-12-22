@@ -1,6 +1,6 @@
-# Claude Code Role Play Frontend
+# ChitChats Frontend
 
-React + TypeScript frontend for the Claude Code Role Play multi-agent chat application.
+React + TypeScript frontend for the ChitChats multi-agent chat application.
 
 ## Tech Stack
 
@@ -8,6 +8,8 @@ React + TypeScript frontend for the Claude Code Role Play multi-agent chat appli
 - **TypeScript** - Type safety
 - **Vite** - Build tool and dev server
 - **Tailwind CSS 4.1** - Styling framework
+- **shadcn/ui** - Component library built on Radix UI primitives
+- **Lucide React** - Icon library
 - **React Markdown** - Markdown rendering with GitHub flavored markdown support
 
 ## Project Structure
@@ -124,7 +126,7 @@ Create `frontend/.env`:
 
 ```bash
 # Backend API URL
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:8001
 
 # For production (Vercel):
 # VITE_API_BASE_URL=https://your-ngrok-domain.ngrok-free.app
@@ -181,12 +183,24 @@ const response = await fetch(`${API_BASE_URL}/rooms/1/messages/poll`, {
 
 See [../SETUP.md](../SETUP.md) for complete authentication details.
 
-## Styling
+## Styling & Components
 
-Uses Tailwind CSS 4.1 with:
+**Tailwind CSS 4.1** with:
 - **Typography Plugin**: Enhanced markdown styling
+- **Animation Plugin**: Smooth transitions and animations
 - **Custom Theme**: Defined in `tailwind.config.js`
 - **Utility-First**: Inline utility classes for styling
+
+**shadcn/ui Components**:
+- Built on Radix UI primitives for accessibility
+- Copy-paste component architecture (components in `src/components/ui/`)
+- Customizable with Tailwind CSS
+- Icons from Lucide React
+
+**Adding components:**
+```bash
+npx shadcn@latest add [component-name]
+```
 
 ## Deployment
 
@@ -235,7 +249,7 @@ npm run build
 - Ensure backend allows your origin in CORS middleware
 
 **Auto-login not working:**
-- Check localStorage for `ccrp_api_key`
+- Check localStorage for `chitchats_api_key`
 - Token may have expired (7-day expiration)
 - Clear localStorage and log in again
 - Check network tab for failed `/auth/verify` request
@@ -256,8 +270,17 @@ npm run lint      # Run ESLint
 - `react-dom` ^19.1.1
 - `typescript` ^5.9.3
 
+**UI Components:**
+- `@radix-ui/react-*` - Accessible component primitives (avatar, dialog, dropdown, scroll-area, etc.)
+- `lucide-react` ^0.555.0 - Icon library
+- `class-variance-authority` ^0.7.1 - CSS variant utilities
+- `clsx` ^2.1.1 - Class name management
+- `tailwind-merge` ^3.4.0 - Tailwind class merging
+- `tailwindcss-animate` ^1.0.7 - Animation utilities
+
 **Markdown:**
 - `react-markdown` ^10.1.0
+- `react-syntax-highlighter` ^16.1.0
 - `remark-gfm` ^4.0.1
 
 **Styling:**

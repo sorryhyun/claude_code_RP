@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { setApiKey as setGlobalApiKey } from '../utils/api';
+import { setApiKey as setGlobalApiKey } from '../services';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const API_KEY_STORAGE_KEY = 'ccrp_api_key';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
+const API_KEY_STORAGE_KEY = 'chitchats_api_key';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -64,7 +64,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             setGlobalApiKey(null);
           }
         } catch (err) {
-          console.error('Auth verification failed:', err);
+          console.error('Auth verification error:', err);
           // Clear the key on verification failure to prevent using invalid credentials
           localStorage.removeItem(API_KEY_STORAGE_KEY);
           setApiKey(null);

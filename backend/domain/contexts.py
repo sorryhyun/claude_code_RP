@@ -5,7 +5,7 @@ Contains all context dataclasses for operations throughout the application.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from .agent_config import AgentConfigData
 from .task_identifier import TaskIdentifier
@@ -43,10 +43,12 @@ class AgentMessageData:
     Attributes:
         content: The message content
         thinking: Optional thinking text from the agent
+        anthropic_calls: Optional list of anthropic tool call situations
     """
 
     content: str
     thinking: Optional[str] = None
+    anthropic_calls: Optional[list[str]] = None
 
 
 @dataclass
@@ -69,12 +71,12 @@ class OrchestrationContext:
 
 
 @dataclass
-class ImageData:
+class ImageAttachment:
     """
-    Image attachment data for sending to Claude SDK.
+    Image attachment data for multimodal messages.
 
     Attributes:
-        data: Base64-encoded image data
+        data: Base64-encoded image data (without data URL prefix)
         media_type: MIME type (e.g., 'image/png', 'image/jpeg')
     """
 
@@ -92,28 +94,29 @@ class AgentResponseContext:
 
     Attributes:
         system_prompt: The system prompt that defines the agent's behavior
-        user_message: The user's message to respond to
+        user_message: The user's message - either a string or list of content blocks
+                      (text/image dicts for native multimodal support)
         agent_name: The name of the agent (used for dynamic agent settings)
         config: Agent configuration data (grouped)
         room_id: Room ID where this response is being generated
         agent_id: Agent ID generating the response
+        group_name: Optional group name for applying group-specific tool config overrides
         session_id: Optional session ID to resume a previous conversation
         conversation_history: Optional recent conversation context for multi-agent rooms
         task_id: Optional unique identifier for tracking this task (for interruption)
         conversation_started: Optional timestamp when the conversation started
         has_situation_builder: Whether the room has a situation builder participant
-        image_data: Optional image attachment to include with the message
     """
 
     system_prompt: str
-    user_message: str
+    user_message: Union[str, List[dict]]
     agent_name: str
     config: AgentConfigData
     room_id: int
     agent_id: int
+    group_name: Optional[str] = None
     session_id: Optional[str] = None
     conversation_history: Optional[str] = None
     task_id: Optional[TaskIdentifier] = None
     conversation_started: Optional[str] = None
     has_situation_builder: bool = False
-    image_data: Optional[ImageData] = None

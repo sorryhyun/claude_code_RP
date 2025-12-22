@@ -12,29 +12,24 @@ import logging
 import uuid
 from typing import AsyncIterator
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
-from config.config_loader import (
-    get_debug_config,
-    get_tool_names_by_group,
-)
-from config.constants import BUILTIN_TOOLS, MAX_THINKING_TOKENS
-from config.parser import GUIDELINE_READ_MODE
+from claude_agent_sdk import ClaudeSDKClient
+
 from core import get_settings
 from domain.contexts import AgentResponseContext
 from domain.task_identifier import TaskIdentifier
-from utils.debug_logger import append_response_to_debug_log, write_debug_log
-from utils.debug_utils import format_message_for_debug
+from infrastructure.logging.agent_logger import append_response_to_debug_log, write_debug_log
+from infrastructure.logging.formatters import format_message_for_debug
 
 from .client_pool import ClientPool
+from .config import get_debug_config
+from .options_builder import build_agent_options
 from .stream_parser import StreamParser
-from .tools import create_action_mcp_server, create_guidelines_mcp_server
 
 # Get settings singleton
 _settings = get_settings()
 
 # Configure from settings
 DEBUG_MODE = get_debug_config().get("debug", {}).get("enabled", False)
-USE_HAIKU = _settings.use_haiku
 
 # Suppress apscheduler debug/info logs
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
@@ -51,16 +46,12 @@ class AgentManager:
         # 2. Use Claude Code web authentication (when running through Claude Code with subscription)
         # If CLAUDE_API_KEY is not set, the SDK will use Claude Code authentication.
         self.active_clients: dict[TaskIdentifier, ClaudeSDKClient] = {}
-        # Client pool for managing SDK client lifecycle (with configurable limits)
-        self.client_pool = ClientPool(
-            max_size=_settings.agent_pool_max_size,
-            lock_timeout=_settings.agent_pool_lock_timeout,
-        )
+        # Client pool for managing SDK client lifecycle
+        self.client_pool = ClientPool()
         # Stream parser for SDK message parsing
         self.stream_parser = StreamParser()
-        # Streaming state for active responses (partial thinking/content)
-        # Key: TaskIdentifier, Value: {"thinking": str, "content": str}
-        self.streaming_state: dict[TaskIdentifier, dict[str, str]] = {}
+        # Streaming state: tracks current thinking text per task during generation
+        self.streaming_state: dict[TaskIdentifier, dict] = {}
 
     async def interrupt_all(self):
         """Interrupt all currently active agent responses."""
@@ -97,20 +88,19 @@ class AgentManager:
                     await client.interrupt()
                     logger.debug(f"Interrupted task: {task_id}")
                     del self.active_clients[task_id]
-                # Clean up streaming state too
-                self.streaming_state.pop(task_id, None)
             except Exception as e:
                 logger.warning(f"Failed to interrupt task {task_id}: {e}")
 
-    def get_streaming_state(self, room_id: int) -> dict[int, dict[str, str]]:
+    def get_streaming_state_for_room(self, room_id: int) -> dict[int, dict]:
         """
-        Get streaming state for all active agents in a room.
+        Get current streaming state (thinking/response text) for all agents in a room.
 
         Args:
             room_id: Room ID
 
         Returns:
-            Dict mapping agent_id to {"thinking": str, "content": str}
+            Dict mapping agent_id to their current streaming state
+            Example: {1: {"thinking_text": "...", "response_text": "..."}}
         """
         result = {}
         for task_id, state in self.streaming_state.items():
@@ -118,53 +108,36 @@ class AgentManager:
                 result[task_id.agent_id] = state
         return result
 
-    def _build_agent_options(self, context: AgentResponseContext, final_system_prompt: str) -> ClaudeAgentOptions:
-        """Build Claude Agent SDK options for the agent."""
-        # Start with built-in tools to disallow (from config.constants)
-        disallowed_tools = BUILTIN_TOOLS.copy()
+    def get_and_clear_streaming_state_for_room(self, room_id: int) -> dict[int, dict]:
+        """
+        Get and clear streaming state for all agents in a room.
 
-        # Create action MCP server with skip, memorize, and optionally recall tools
-        logger.debug(f"Creating action MCP server for agent: '{context.agent_name}'")
-        action_mcp_server = create_action_mcp_server(
-            agent_name=context.agent_name,
-            agent_id=context.agent_id,
-            config_file=context.config.config_file,
-            long_term_memory_index=context.config.long_term_memory_index,
-        )
+        Used during interrupt to capture partial responses before clearing state.
+        This ensures we can save any in-progress responses to DB.
 
-        # Create guidelines MCP server (handles both DESCRIPTION and ACTIVE_TOOL modes)
-        # - DESCRIPTION mode: Guidelines passively injected via tool description
-        # - ACTIVE_TOOL mode: Agents call mcp__guidelines__read to retrieve guidelines
-        logger.debug(f"Creating guidelines MCP server for agent: '{context.agent_name}' (mode: {GUIDELINE_READ_MODE})")
-        guidelines_mcp_server = create_guidelines_mcp_server(
-            agent_name=context.agent_name, has_situation_builder=context.has_situation_builder
-        )
+        Args:
+            room_id: Room ID
 
-        # Build allowed tools list using group-based approach
-        allowed_tool_names = [*get_tool_names_by_group("guidelines"), *get_tool_names_by_group("action")]
+        Returns:
+            Dict mapping agent_id to their streaming state (thinking_text, response_text)
+        """
+        result = {}
+        task_ids_to_clear = []
 
-        # Build MCP servers dict
-        mcp_servers = {
-            "guidelines": guidelines_mcp_server,
-            "action": action_mcp_server,
-        }
+        for task_id, state in self.streaming_state.items():
+            if task_id.room_id == room_id:
+                # Copy the state (don't just reference it)
+                result[task_id.agent_id] = {
+                    "thinking_text": state.get("thinking_text", ""),
+                    "response_text": state.get("response_text", ""),
+                }
+                task_ids_to_clear.append(task_id)
 
-        options = ClaudeAgentOptions(
-            model="claude-opus-4-5-20251101" if not USE_HAIKU else "claude-haiku-4-5-20251001",
-            system_prompt=final_system_prompt,
-            disallowed_tools=disallowed_tools,
-            permission_mode="default",
-            max_thinking_tokens=MAX_THINKING_TOKENS,
-            mcp_servers=mcp_servers,
-            allowed_tools=allowed_tool_names,
-            setting_sources=[],
-            cwd=_settings.agent_cwd,
-        )
+        # Clear the streaming state for these tasks
+        for task_id in task_ids_to_clear:
+            del self.streaming_state[task_id]
 
-        if context.session_id:
-            options.resume = context.session_id
-
-        return options
+        return result
 
     async def generate_sdk_response(self, context: AgentResponseContext) -> AsyncIterator[dict]:
         """
@@ -182,7 +155,7 @@ class AgentManager:
             - {"type": "content_delta", "delta": str}
             - {"type": "thinking_delta", "delta": str}
             - {"type": "stream_end", "response_text": Optional[str], "thinking_text": str,
-               "session_id": str, "memory_entries": list[str]}
+               "session_id": str, "memory_entries": list[str], "anthropic_calls": list[str]}
         """
 
         # Create task identifier from room and agent IDs
@@ -210,42 +183,32 @@ class AgentManager:
             # Build final system prompt
             final_system_prompt = context.system_prompt
             if context.conversation_started:
-                final_system_prompt = (
-                    f"{context.system_prompt}\n\n---\n\nConversation started on: {context.conversation_started}"
-                )
-
-            # Build agent options
-            options = self._build_agent_options(context, final_system_prompt)
+                final_system_prompt = f"{context.system_prompt}\n\n---\n\nCurrent time: {context.conversation_started}"
 
             response_text = ""
             thinking_text = ""
             new_session_id = context.session_id
             skip_tool_called = False
             memory_entries = []  # Track memory entries from memorize tool calls
+            anthropic_calls = []  # Track anthropic tool calls (via hook)
 
-            # Build the message with conversation history if provided
-            # If there's an image attachment, create a content list with both image and text
-            if context.image_data:
-                # For the Claude Agent SDK, we need to send the message with image as a structured content
-                # The SDK should support the Messages API format with content blocks
-                text_content = context.user_message
+            # Build agent options with hook to capture anthropic tool calls
+            options = build_agent_options(context, final_system_prompt, anthropic_calls)
+
+            # Build the message content - can be string or list of content blocks
+            # Content blocks may include inline images within <conversation_so_far>
+            if isinstance(context.user_message, list):
+                # Content blocks with potential inline images
+                content_blocks = context.user_message
                 if context.conversation_history:
-                    text_content = f"{context.conversation_history}\n\n{context.user_message}"
-
-                # Create message content with image block followed by text
-                # The Claude Agent SDK query() accepts either a string or a list of content blocks
-                message_to_send = [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": context.image_data.media_type,
-                            "data": context.image_data.data,
-                        },
-                    },
-                    {"type": "text", "text": text_content},
-                ]
+                    # Prepend conversation history to first text block
+                    for block in content_blocks:
+                        if block.get("type") == "text":
+                            block["text"] = f"{context.conversation_history}\n\n{block['text']}"
+                            break
+                message_to_send = content_blocks
             else:
+                # Simple string message
                 message_to_send = context.user_message
                 if context.conversation_history:
                     message_to_send = f"{context.conversation_history}\n\n{context.user_message}"
@@ -257,108 +220,144 @@ class AgentManager:
 
             # Register this client for interruption support
             self.active_clients[task_id] = client
-            # Initialize streaming state for this task
-            self.streaming_state[task_id] = {"thinking": "", "content": ""}
             logger.debug(f"Registered client for task: {task_id}")
 
+            # Initialize streaming state for this task
+            self.streaming_state[task_id] = {"thinking_text": "", "response_text": ""}
+
+            # Calculate message length for logging
+            if isinstance(message_to_send, list):
+                msg_len = sum(len(b.get("text", "")) for b in message_to_send if b.get("type") == "text")
+                has_images = any(b.get("type") == "image" for b in message_to_send)
+            else:
+                msg_len = len(message_to_send)
+                has_images = False
+
+            # Write debug log with complete agent input
+            await write_debug_log(
+                agent_name=context.agent_name,
+                task_id=str(task_id),
+                system_prompt=final_system_prompt,
+                message_to_send=str(message_to_send) if isinstance(message_to_send, list) else message_to_send,
+                config_data={
+                    "in_a_nutshell": context.config.in_a_nutshell,
+                    "characteristics": context.config.characteristics,
+                    "recent_events": context.config.recent_events,
+                },
+                options=options,
+                has_situation_builder=context.has_situation_builder,
+            )
+
+            # Send the message via query() - this is the correct SDK pattern
+            logger.info(
+                f"📤 Sending message to agent | Task: {context.task_id} | Message length: {msg_len}{' (with images)' if has_images else ''}"
+            )
+
             try:
-                # Write debug log with complete agent input
-                await write_debug_log(
-                    agent_name=context.agent_name,
-                    task_id=str(task_id),
-                    system_prompt=final_system_prompt,
-                    message_to_send=message_to_send,
-                    config_data={
-                        "in_a_nutshell": context.config.in_a_nutshell,
-                        "characteristics": context.config.characteristics,
-                        "recent_events": context.config.recent_events,
-                    },
-                    options=options,
-                    has_situation_builder=context.has_situation_builder,
-                )
-
-                # Send the message via query() - this is the correct SDK pattern
-                logger.info(f"📤 Sending message to agent | Task: {task_id} | Message length: {len(message_to_send)}")
-
-                try:
-                    # Add timeout to query to prevent hanging (configurable via AGENT_QUERY_TIMEOUT)
-                    await asyncio.wait_for(client.query(message_to_send), timeout=_settings.agent_query_timeout)
-                    logger.info(f"📬 Message sent, waiting for response | Task: {task_id}")
-                except asyncio.TimeoutError:
-                    logger.error(f"⏰ Timeout sending message to agent | Task: {task_id}")
-                    raise Exception(f"Timeout sending message to agent (>{_settings.agent_query_timeout}s)")
-
-                # Receive and stream the response
-                async for message in client.receive_response():
-                    # Parse the message using StreamParser
-                    parsed = self.stream_parser.parse_message(message, response_text, thinking_text)
-
-                    # Calculate deltas for yielding
-                    content_delta = parsed.response_text[len(response_text) :]
-                    thinking_delta = parsed.thinking_text[len(thinking_text) :]
-
-                    # Update session if found
-                    if parsed.session_id:
-                        new_session_id = parsed.session_id
-
-                    # Update skip flag
-                    if parsed.skip_used:
-                        skip_tool_called = True
-
-                    # Collect memory entries
-                    memory_entries.extend(parsed.memory_entries)
-
-                    # Update accumulated text
-                    response_text = parsed.response_text
-                    thinking_text = parsed.thinking_text
-
-                    # Yield delta events for content and thinking
-                    if content_delta:
-                        logger.info(f"🔄 YIELDING content delta | Length: {len(content_delta)}")
-                        # Update streaming state for polling
-                        if task_id in self.streaming_state:
-                            self.streaming_state[task_id]["content"] = response_text
+                # Build query content: multimodal if content blocks with images, otherwise plain text/blocks
+                if isinstance(message_to_send, list) and has_images:
+                    # SDK requires async generator for multimodal content (per example.md pattern)
+                    async def multimodal_message_generator():
                         yield {
-                            "type": "content_delta",
-                            "delta": content_delta,
-                            "temp_id": temp_id,
+                            "type": "user",
+                            "message": {
+                                "role": "user",
+                                "content": message_to_send,  # Content blocks with inline images
+                            },
                         }
 
-                    if thinking_delta:
-                        logger.info(f"🔄 YIELDING thinking delta | Length: {len(thinking_delta)}")
-                        # Update streaming state for polling
-                        if task_id in self.streaming_state:
-                            self.streaming_state[task_id]["thinking"] = thinking_text
-                        yield {
-                            "type": "thinking_delta",
-                            "delta": thinking_delta,
-                            "temp_id": temp_id,
-                        }
+                    logger.info(f"📸 Sending multimodal message with inline images | Task: {context.task_id}")
+                    query_content = multimodal_message_generator()
+                elif isinstance(message_to_send, list):
+                    # Content blocks but no images - extract text for simple query
+                    text_content = "\n".join(b.get("text", "") for b in message_to_send if b.get("type") == "text")
+                    query_content = text_content
+                else:
+                    query_content = message_to_send
 
-                    # Debug log each message received from the SDK
-                    # Configuration loaded from debug.yaml
-                    if DEBUG_MODE:
-                        # Get streaming config from debug.yaml
-                        config = get_debug_config()
-                        streaming_config = config.get("debug", {}).get("logging", {}).get("streaming", {})
+                # Add timeout to query to prevent hanging
+                await asyncio.wait_for(client.query(query_content), timeout=10.0)
+                logger.info(f"📬 Message sent, waiting for response | Task: {context.task_id}")
+            except asyncio.TimeoutError:
+                logger.error(f"⏰ Timeout sending message to agent | Task: {context.task_id}")
+                raise Exception("Timeout sending message to agent")
 
-                        if streaming_config.get("enabled", True):
-                            # Skip system init messages if configured
-                            is_system_init = (
-                                message.__class__.__name__ == "SystemMessage"
-                                and hasattr(message, "subtype")
-                                and message.subtype == "init"
-                            )
-                            skip_system_init = streaming_config.get("skip_system_init", True)
+            # Receive and stream the response
+            async for message in client.receive_response():
+                # Parse the message using StreamParser
+                parsed = self.stream_parser.parse_message(message, response_text, thinking_text)
 
-                            if not (is_system_init and skip_system_init):
-                                logger.debug(f"📨 Received message:\n{format_message_for_debug(message)}")
-            finally:
-                # Always unregister the client when done (success or failure)
-                self.active_clients.pop(task_id, None)
-                # Clean up streaming state
-                self.streaming_state.pop(task_id, None)
-                logger.debug(f"Unregistered client for task: {task_id}")
+                # Calculate deltas for yielding
+                content_delta = parsed.response_text[len(response_text) :]
+                thinking_delta = parsed.thinking_text[len(thinking_text) :]
+
+                # Update session if found
+                if parsed.session_id:
+                    new_session_id = parsed.session_id
+
+                # Update skip flag
+                if parsed.skip_used:
+                    skip_tool_called = True
+
+                # Collect memory entries
+                memory_entries.extend(parsed.memory_entries)
+
+                # Note: anthropic_calls are now captured via PostToolUse hook
+                # (stream parser may not see tool_use blocks for MCP tools)
+
+                # Update accumulated text
+                response_text = parsed.response_text
+                thinking_text = parsed.thinking_text
+
+                # Update streaming state for polling access
+                if task_id in self.streaming_state:
+                    self.streaming_state[task_id]["thinking_text"] = thinking_text
+                    self.streaming_state[task_id]["response_text"] = response_text
+
+                # Yield delta events for content and thinking
+                if content_delta:
+                    logger.info(f"🔄 YIELDING content delta | Length: {len(content_delta)}")
+                    yield {
+                        "type": "content_delta",
+                        "delta": content_delta,
+                        "temp_id": temp_id,
+                    }
+
+                if thinking_delta:
+                    logger.info(f"🔄 YIELDING thinking delta | Length: {len(thinking_delta)}")
+                    yield {
+                        "type": "thinking_delta",
+                        "delta": thinking_delta,
+                        "temp_id": temp_id,
+                    }
+
+                # Debug log each message received from the SDK
+                # Configuration loaded from debug.yaml
+                if DEBUG_MODE:
+                    # Get streaming config from debug.yaml
+                    config = get_debug_config()
+                    streaming_config = config.get("debug", {}).get("logging", {}).get("streaming", {})
+
+                    if streaming_config.get("enabled", True):
+                        # Skip system init messages if configured
+                        is_system_init = (
+                            message.__class__.__name__ == "SystemMessage"
+                            and hasattr(message, "subtype")
+                            and message.subtype == "init"
+                        )
+                        skip_system_init = streaming_config.get("skip_system_init", True)
+
+                        if not (is_system_init and skip_system_init):
+                            logger.debug(f"📨 Received message:\n{format_message_for_debug(message)}")
+
+            # Unregister the client when done
+            if context.task_id and context.task_id in self.active_clients:
+                del self.active_clients[context.task_id]
+                logger.debug(f"Unregistered client for task: {context.task_id}")
+
+            # Clean up streaming state
+            if task_id in self.streaming_state:
+                del self.streaming_state[task_id]
 
             # Log response summary
             final_response = response_text if response_text else None
@@ -371,6 +370,8 @@ class AgentManager:
                 )
             if memory_entries:
                 logger.info(f"💾 Recorded {len(memory_entries)} memory entries")
+            if anthropic_calls:
+                logger.info(f"🔒 Agent called anthropic {len(anthropic_calls)} times: {anthropic_calls}")
 
             # Append response to debug log
             append_response_to_debug_log(
@@ -389,13 +390,22 @@ class AgentManager:
                 "thinking_text": thinking_text,
                 "session_id": new_session_id,
                 "memory_entries": memory_entries,
+                "anthropic_calls": anthropic_calls,
                 "skipped": skip_tool_called,
             }
 
         except asyncio.CancelledError:
             # Task was cancelled due to interruption - this is expected
-            # Client cleanup handled by finally block above
-            logger.info(f"🛑 Agent response interrupted | Task: {task_id}")
+            # Clean up client from active_clients (but keep it in pool for reuse)
+            if context.task_id and context.task_id in self.active_clients:
+                del self.active_clients[context.task_id]
+                logger.debug(f"Unregistered client for task (interrupted): {context.task_id}")
+
+            # Clean up streaming state
+            if task_id in self.streaming_state:
+                del self.streaming_state[task_id]
+
+            logger.info(f"🛑 Agent response interrupted | Task: {context.task_id}")
             # Yield stream_end to indicate interruption
             yield {
                 "type": "stream_end",
@@ -404,16 +414,24 @@ class AgentManager:
                 "thinking_text": "",
                 "session_id": context.session_id,
                 "memory_entries": [],
+                "anthropic_calls": [],
                 "skipped": True,
             }
 
         except Exception as e:
-            # Client cleanup handled by finally block above
+            # Clean up client on error
+            if context.task_id and context.task_id in self.active_clients:
+                del self.active_clients[context.task_id]
+                logger.debug(f"Unregistered client for task (error cleanup): {context.task_id}")
+
+            # Clean up streaming state
+            if task_id in self.streaming_state:
+                del self.streaming_state[task_id]
 
             # Check if this is an interruption-related error
             error_str = str(e).lower()
             if "interrupt" in error_str or "cancelled" in error_str:
-                logger.info(f"🛑 Agent response interrupted | Task: {task_id}")
+                logger.info(f"🛑 Agent response interrupted | Task: {context.task_id}")
                 # Yield stream_end to indicate interruption
                 yield {
                     "type": "stream_end",
@@ -422,6 +440,7 @@ class AgentManager:
                     "thinking_text": "",
                     "session_id": context.session_id,
                     "memory_entries": [],
+                    "anthropic_calls": [],
                     "skipped": True,
                 }
                 return
@@ -441,5 +460,6 @@ class AgentManager:
                 "thinking_text": "",
                 "session_id": context.session_id,
                 "memory_entries": [],
+                "anthropic_calls": [],
                 "skipped": False,
             }

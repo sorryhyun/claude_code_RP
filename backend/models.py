@@ -22,7 +22,8 @@ class Room(Base):
     owner_id = Column(String, nullable=True, index=True)
     name = Column(String, nullable=False, index=True)
     max_interactions = Column(Integer, nullable=True)  # Maximum number of agent interactions (None = unlimited)
-    is_paused = Column(Boolean, default=False)  # Whether the room is paused
+    is_paused = Column(Boolean, default=False)  # Whether room is paused
+    is_finished = Column(Boolean, default=False)  # Whether all agents have skipped (conversation ended)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_activity_at = Column(
         DateTime, default=datetime.utcnow, index=True
@@ -46,10 +47,10 @@ class Agent(Base):
     characteristics = Column(Text, nullable=True)  # Personality traits and behaviors
     recent_events = Column(Text, nullable=True)  # Short-term recent context
     system_prompt = Column(Text, nullable=False)  # Final combined system prompt
-    is_critic = Column(Boolean, default=False)  # Whether the agent is a critic/observer
-    interrupt_every_turn = Column(Boolean, default=False)  # Always respond after any message
-    priority = Column(Integer, default=0)  # Response order (higher = responds first)
-    transparent = Column(Boolean, default=False)  # Messages don't trigger other agents
+    is_critic = Column(Boolean, default=False)  # Whether agent is a critic/observer
+    interrupt_every_turn = Column(Boolean, default=False)  # Whether agent always responds after any message
+    priority = Column(Integer, default=0)  # Priority level (0 = normal, higher = more priority)
+    transparent = Column(Boolean, default=False)  # Whether agent's messages don't trigger other agents
     created_at = Column(DateTime, default=datetime.utcnow)
 
     rooms = relationship("Room", secondary=room_agents, back_populates="agents")
@@ -61,51 +62,22 @@ class Agent(Base):
         Extract agent configuration from filesystem (primary source) or database (fallback).
         This implements the filesystem-primary architecture with in-memory caching.
 
-        Cache entries are invalidated when underlying config files are modified.
-
         Args:
             use_cache: If True, check cache before loading from filesystem (default: True)
 
         Returns:
             AgentConfigData instance with this agent's configuration
         """
-
-        from core.paths import get_work_dir
         from domain.agent_config import AgentConfigData
-        from utils.cache import agent_config_key, get_cache
-
-        def _get_config_mtime() -> float:
-            """Get the most recent mtime of all config files for this agent."""
-            if not self.config_file:
-                return 0
-            config_path = get_work_dir() / self.config_file
-            if not config_path.is_dir():
-                return config_path.stat().st_mtime if config_path.exists() else 0
-            # For folder-based configs, check all .md files
-            max_mtime = 0
-            for md_file in config_path.glob("*.md"):
-                try:
-                    max_mtime = max(max_mtime, md_file.stat().st_mtime)
-                except OSError:
-                    pass
-            return max_mtime
+        from infrastructure.cache import agent_config_key, get_cache
 
         # Check cache first if enabled
         if use_cache:
             cache = get_cache()
             cache_key = agent_config_key(self.id)
-            mtime_key = f"{cache_key}:mtime"
             cached_config = cache.get(cache_key)
-            cached_mtime = cache.get(mtime_key)
-
-            if cached_config is not None and cached_mtime is not None:
-                # Check if files have been modified since caching
-                current_mtime = _get_config_mtime()
-                if current_mtime <= cached_mtime:
-                    return cached_config
-                # Files modified - invalidate and reload
-                cache.invalidate(cache_key)
-                cache.invalidate(mtime_key)
+            if cached_config is not None:
+                return cached_config
 
         # FILESYSTEM-PRIMARY: Load from filesystem first
         config_data = None
@@ -135,13 +107,11 @@ class Agent(Base):
             # Ensure config_file is set even when loaded from filesystem
             config_data.config_file = self.config_file
 
-        # Cache the result with mtime tracking (TTL: 300 seconds = 5 minutes)
+        # Cache the result (TTL: 300 seconds = 5 minutes)
         if use_cache:
             cache = get_cache()
             cache_key = agent_config_key(self.id)
-            mtime_key = f"{cache_key}:mtime"
             cache.set(cache_key, config_data, ttl_seconds=300)
-            cache.set(mtime_key, _get_config_mtime(), ttl_seconds=300)
 
         return config_data
 
@@ -159,15 +129,16 @@ class Message(Base):
     )  # For user messages: 'user', 'situation_builder', 'character'; NULL for agents
     participant_name = Column(String, nullable=True)  # Custom name for 'character' mode
     thinking = Column(Text, nullable=True)  # Agent's thinking process (for assistant messages)
-    image_data = Column(Text, nullable=True)  # JSON string of ImageAttachment (base64 image + media_type)
+    anthropic_calls = Column(Text, nullable=True)  # JSON array of anthropic tool call situations
     timestamp = Column(DateTime, default=datetime.utcnow)
+    image_data = Column(Text, nullable=True)  # Base64-encoded image data
+    image_media_type = Column(String, nullable=True)  # MIME type (e.g., 'image/png', 'image/jpeg')
 
     # Indexes for frequently queried foreign keys
     __table_args__ = (
         Index("idx_message_room_id", "room_id"),
         Index("idx_message_agent_id", "agent_id"),
         Index("idx_message_room_timestamp", "room_id", "timestamp"),
-        Index("idx_message_room_agent", "room_id", "agent_id"),  # Composite for efficient agent message queries
     )
 
     room = relationship("Room", back_populates="messages")

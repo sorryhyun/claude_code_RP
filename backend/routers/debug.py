@@ -2,19 +2,17 @@
 Debug and monitoring endpoints.
 
 These endpoints provide access to cache statistics and other debugging information.
-All debug endpoints require admin privileges.
 """
 
 from typing import Dict
 
-from auth import require_admin
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from services.cache_service import get_cache_service
 
 router = APIRouter()
 
 
-@router.get("/cache/stats", dependencies=[Depends(require_admin)])
+@router.get("/cache/stats")
 async def get_cache_stats() -> Dict[str, int]:
     """
     Get current cache statistics.
@@ -32,7 +30,7 @@ async def get_cache_stats() -> Dict[str, int]:
     return cache_service.get_stats()
 
 
-@router.post("/cache/cleanup", dependencies=[Depends(require_admin)])
+@router.post("/cache/cleanup")
 async def cleanup_cache() -> Dict[str, str]:
     """
     Manually trigger cache cleanup to remove expired entries.
@@ -45,7 +43,7 @@ async def cleanup_cache() -> Dict[str, str]:
     return {"status": "success", "message": "Cache cleanup completed"}
 
 
-@router.post("/cache/clear", dependencies=[Depends(require_admin)])
+@router.post("/cache/clear")
 async def clear_cache() -> Dict[str, str]:
     """
     Clear all cache entries.

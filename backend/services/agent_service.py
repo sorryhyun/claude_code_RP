@@ -8,8 +8,8 @@ between CRUD operations and other services (like agent manager cleanup).
 from typing import TYPE_CHECKING
 
 import crud
+from domain.task_identifier import TaskIdentifier
 from sqlalchemy.ext.asyncio import AsyncSession
-from utils.helpers import get_pool_key
 
 if TYPE_CHECKING:
     from orchestration import ChatOrchestrator
@@ -63,7 +63,7 @@ async def remove_agent_from_room_with_cleanup(
         return False
 
     # Cleanup the client for this room-agent pair
-    pool_key = get_pool_key(room_id, agent_id)
+    pool_key = TaskIdentifier(room_id=room_id, agent_id=agent_id)
     await agent_manager.client_pool.cleanup(pool_key)
 
     return True
@@ -110,7 +110,7 @@ async def delete_room_with_cleanup(
     # Cleanup all clients for this room (with error handling for each client)
     for agent in agents:
         try:
-            pool_key = get_pool_key(room_id, agent.id)
+            pool_key = TaskIdentifier(room_id=room_id, agent_id=agent.id)
             await agent_manager.client_pool.cleanup(pool_key)
             logger.info(f"✅ Cleaned up client for agent {agent.id} in room {room_id}")
         except Exception as e:
@@ -149,11 +149,13 @@ async def clear_room_messages_with_cleanup(
     agents = await crud.get_agents(db, room_id)
     logger.info(f"🗑️  Clearing room {room_id} messages | Agents: {len(agents)}")
 
-    # Interrupt any active processing FIRST
+    # Interrupt any active processing FIRST (don't save partial responses since we're clearing all)
     if chat_orchestrator:
         try:
             logger.info(f"🛑 Interrupting room {room_id} processing before clearing messages")
-            await chat_orchestrator.interrupt_room_processing(room_id, agent_manager)
+            await chat_orchestrator.interrupt_room_processing(
+                room_id, agent_manager, save_partial_responses=False
+            )
         except Exception as e:
             logger.error(f"❌ Error interrupting room {room_id}: {e}")
             # Continue with cleanup even if interruption fails
@@ -166,17 +168,19 @@ async def clear_room_messages_with_cleanup(
 
     # Clear all session IDs for this room (fresh start)
     # This is done by deleting the RoomAgentSession records
+    from database import serialized_write
     from models import RoomAgentSession
     from sqlalchemy import delete
 
-    await db.execute(delete(RoomAgentSession).where(RoomAgentSession.room_id == room_id))
-    await db.commit()
+    async with serialized_write():
+        await db.execute(delete(RoomAgentSession).where(RoomAgentSession.room_id == room_id))
+        await db.commit()
     logger.info(f"✅ Cleared all session IDs for room {room_id}")
 
     # Cleanup all clients for this room (they may have stale session references)
     for agent in agents:
         try:
-            pool_key = get_pool_key(room_id, agent.id)
+            pool_key = TaskIdentifier(room_id=room_id, agent_id=agent.id)
             logger.info(f"🧹 Calling client_pool.cleanup for {pool_key}")
             await agent_manager.client_pool.cleanup(pool_key)
         except Exception as e:

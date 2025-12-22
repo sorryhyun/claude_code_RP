@@ -68,7 +68,7 @@ done
 if [ -f ".env" ] && [ -z "$JWT_TOKEN" ]; then
     JWT_TOKEN=$(grep '^JWT_TOKEN=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
     if [ -z "$PASSWORD" ]; then
-        PASSWORD=$(grep '^CCRP_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
+        PASSWORD=$(grep '^CHITCHATS_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
     fi
 fi
 

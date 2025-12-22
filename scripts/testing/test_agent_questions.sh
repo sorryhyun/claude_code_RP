@@ -8,21 +8,50 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
 NC='\033[0m'
+
+# Parse flags
+QUIET=false
+SHOW_THINKING=false
+while [[ "$1" == -* ]]; do
+    case "$1" in
+        -q|--quiet)
+            QUIET=true
+            shift
+            ;;
+        -t|--thinking)
+            SHOW_THINKING=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Helper function for quiet-aware echo
+qecho() {
+    if [ "$QUIET" != "true" ]; then
+        echo -e "$@"
+    fi
+}
 
 # Load configuration from .env if it exists
 if [ -f ".env" ]; then
     # Load JWT token
     JWT_TOKEN=$(grep '^JWT_TOKEN=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
     # Load password if available
-    PASSWORD=$(grep '^CCRP_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
+    PASSWORD=$(grep '^CHITCHATS_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
 fi
 
 # Configuration
 QUESTIONS_PER_AGENT=${1:-10}  # Questions to ask each agent (default: 10)
-API_BASE="${BACKEND_URL:-http://localhost:8000}"
-PASSWORD="${PASSWORD:-${CCRP_PASSWORD:-}}"  # From .env, env var, or will prompt
+API_BASE="${BACKEND_URL:-http://localhost:8001}"
+PASSWORD="${PASSWORD:-${CHITCHATS_PASSWORD:-}}"  # From .env, env var, or will prompt
 JWT_TOKEN="${JWT_TOKEN:-}"
+CHECK_ANT="${CHECK_ANT:-0}"  # Show anthropic model info if set to 1
 
 # Agents to test (can be specified as arguments after question count)
 # Example: ./test_agent_questions.sh 10 봇치 프리렌 치즈루 코베니
@@ -30,7 +59,9 @@ JWT_TOKEN="${JWT_TOKEN:-}"
 if [ $# -gt 0 ]; then
     AGENTS_TO_TEST=("$@")
 else
-    AGENTS_TO_TEST=("페른" "프리렌")
+    AGENTS_TO_TEST=("프리렌" "페른") 
+    # "덴지" "마키마" "릿카" "유이" "치카" "리카" "레나"
+    # AGENTS_TO_TEST=("마키마" "릿카" "유이" "치카" "에루")
 fi
 
 # Generate unique timestamp prefix for this batch
@@ -66,7 +97,7 @@ api_call() {
 # Function to authenticate and get JWT token
 authenticate() {
     if [ -n "$JWT_TOKEN" ]; then
-        echo -e "${YELLOW}Using existing JWT token...${NC}" >&2
+        [ "$QUIET" != "true" ] && echo -e "${YELLOW}Using existing JWT token...${NC}" >&2
         echo "$JWT_TOKEN"
         return
     fi
@@ -94,8 +125,10 @@ log() {
     local message="$1"
     local output_file="$2"
 
-    # Print with colors to terminal
-    echo -e "$message"
+    # Print with colors to terminal (unless quiet mode)
+    if [ "$QUIET" != "true" ]; then
+        echo -e "$message"
+    fi
 
     # Strip ANSI codes and write to file
     if [ -n "$output_file" ]; then
@@ -139,7 +172,100 @@ extract_questions() {
     printf '%s\n' "${questions[@]}"
 }
 
-# Function to test a single agent sequentially
+# Function to test a single question (runs in its own process)
+test_single_question() {
+    local agent_name=$1
+    local agent_id=$2
+    local q_num=$3
+    local total_questions=$4
+    local question=$5
+    local token=$6
+    local temp_output_file=$7
+
+    # Create new room for this question (paused to exclude from background scheduler)
+    local room_name="Q${q_num}_${agent_name}_${BATCH_ID}"
+    local room_data=$(api_call POST "/rooms" "{\"name\":\"$room_name\",\"max_interactions\":5,\"is_paused\":true}" "$token")
+    local room_id=$(echo "$room_data" | jq -r '.id // empty')
+
+    if [ -z "$room_id" ]; then
+        echo "[ERROR] Failed to create room" > "$temp_output_file"
+        return 1
+    fi
+
+    # Add agent to room
+    local add_response=$(api_call POST "/rooms/$room_id/agents/$agent_id" "" "$token")
+    if ! echo "$add_response" | jq -e '.id' >/dev/null; then
+        echo "[ERROR] Failed to add agent to room" > "$temp_output_file"
+        api_call DELETE "/rooms/$room_id" "" "$token" >/dev/null
+        return 1
+    fi
+
+    # Escape question for JSON
+    local question_json=$(echo "$question" | jq -Rs .)
+
+    # Send question as user message
+    local send_response=$(api_call POST "/rooms/$room_id/messages/send" \
+        "{\"content\":$question_json,\"role\":\"user\",\"participant_type\":\"user\"}" \
+        "$token")
+
+    if ! echo "$send_response" | jq -e '.id' >/dev/null; then
+        echo "[ERROR] Failed to send question" > "$temp_output_file"
+        api_call DELETE "/rooms/$room_id" "" "$token" >/dev/null
+        return 1
+    fi
+
+    # Get the message ID of the question we just sent
+    local sent_message_id=$(echo "$send_response" | jq -r '.id')
+
+    # Poll for agent response (up to 120 seconds)
+    local wait_count=0
+    local max_wait=180  # 60 * 2 seconds = 120 seconds
+    local agent_response=""
+
+    while [ $wait_count -lt $max_wait ]; do
+        sleep 2
+
+        # Poll for new messages since our question
+        local messages=$(api_call GET "/rooms/$room_id/messages/poll?since_id=$sent_message_id" "" "$token")
+
+        # Check if we got new messages
+        local msg_count=$(echo "$messages" | jq 'length')
+
+        if [ "$msg_count" -gt 0 ]; then
+            agent_response=$(echo "$messages" | jq -r '.[0].content // empty')
+            agent_thinking=$(echo "$messages" | jq -r '.[0].thinking // empty')
+            agent_anthropic_calls=$(echo "$messages" | jq -c '.[0].anthropic_calls // empty')
+
+            if [ -n "$agent_response" ] && [ "$agent_response" != "null" ]; then
+                break
+            fi
+        fi
+
+        ((wait_count++))
+    done
+
+    # Write result to temp file
+    {
+        echo "Q_NUM:${q_num}"
+        echo "QUESTION:${question}"
+        if [ -n "$agent_thinking" ] && [ "$agent_thinking" != "null" ]; then
+            echo "THINKING:${agent_thinking}"
+        fi
+        if [ -n "$agent_anthropic_calls" ] && [ "$agent_anthropic_calls" != "null" ] && [ "$agent_anthropic_calls" != "[]" ]; then
+            echo "ANTHROPIC_CALLS:${agent_anthropic_calls}"
+        fi
+        if [ -n "$agent_response" ] && [ "$agent_response" != "null" ]; then
+            echo "ANSWER:${agent_response}"
+        else
+            echo "ANSWER:[NO RESPONSE AFTER 120s]"
+        fi
+    } > "$temp_output_file"
+
+    # Delete the room (cleanup)
+    api_call DELETE "/rooms/$room_id" "" "$token" >/dev/null
+}
+
+# Function to test a single agent with parallel questions
 test_agent() {
     local agent_name=$1
     local questions_file=$2
@@ -160,123 +286,118 @@ test_agent() {
 
     # Extract questions
     readarray -t questions < <(extract_questions "$questions_file" "$max_questions")
+    local total_questions=${#questions[@]}
 
-    log "\n${BLUE}[${agent_name}] Asking ${#questions[@]} questions...${NC}\n" "$output_file"
+    log "\n${BLUE}[${agent_name}] Asking ${total_questions} questions in parallel...${NC}\n" "$output_file"
 
-    # Ask each question in a separate room
+    # Create temp directory for results
+    local temp_dir=$(mktemp -d)
+    local pids=()
+
+    # Launch all questions in parallel
     local q_num=1
     for question in "${questions[@]}"; do
-        log "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" "$output_file"
-        log "${GREEN}[${agent_name}] Question ${q_num}/${#questions[@]}${NC}" "$output_file"
-        log "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" "$output_file"
+        local temp_output="${temp_dir}/q${q_num}.txt"
 
-        # Create new room for this question (paused to exclude from background scheduler)
-        local room_name="Q${q_num}_${agent_name}_${BATCH_ID}"
-        local room_data=$(api_call POST "/rooms" "{\"name\":\"$room_name\",\"max_interactions\":5,\"is_paused\":true}" "$token")
-        local room_id=$(echo "$room_data" | jq -r '.id // empty')
+        # Export necessary functions and variables for subshell
+        export -f api_call test_single_question
+        export API_BASE BATCH_ID CHECK_ANT
 
-        if [ -z "$room_id" ]; then
-            log "${RED}[${agent_name}] Failed to create room for Q${q_num}${NC}\n" "$output_file"
-            ((q_num++))
-            continue
-        fi
+        # Launch question test in background
+        test_single_question "$agent_name" "$agent_id" "$q_num" "$total_questions" "$question" "$token" "$temp_output" &
+        pids+=($!)
 
-        # Add agent to room
-        local add_response=$(api_call POST "/rooms/$room_id/agents/$agent_id" "" "$token")
-        if ! echo "$add_response" | jq -e '.id' >/dev/null; then
-            log "${RED}[${agent_name}] Failed to add agent to room${NC}\n" "$output_file"
-            api_call DELETE "/rooms/$room_id" "" "$token" >/dev/null
-            ((q_num++))
-            continue
-        fi
-
-        # Escape question for JSON
-        local question_json=$(echo "$question" | jq -Rs .)
-
-        # Send question as user message
-        local send_response=$(api_call POST "/rooms/$room_id/messages/send" \
-            "{\"content\":$question_json,\"role\":\"user\",\"participant_type\":\"user\"}" \
-            "$token")
-
-        if ! echo "$send_response" | jq -e '.id' >/dev/null; then
-            log "${RED}[${agent_name}] Failed to send question${NC}\n" "$output_file"
-            api_call DELETE "/rooms/$room_id" "" "$token" >/dev/null
-            ((q_num++))
-            continue
-        fi
-
-        log "Q: ${question}\n" "$output_file"
-
-        # Get the message ID of the question we just sent
-        local sent_message_id=$(echo "$send_response" | jq -r '.id')
-
-        # Poll for agent response (up to 120 seconds)
-        local wait_count=0
-        local max_wait=60  # 60 * 2 seconds = 120 seconds
-        local got_response=false
-
-        while [ $wait_count -lt $max_wait ]; do
-            sleep 2
-
-            # Poll for new messages since our question
-            local messages=$(api_call GET "/rooms/$room_id/messages/poll?since_id=$sent_message_id" "" "$token")
-
-            # Check if we got new messages
-            local msg_count=$(echo "$messages" | jq 'length')
-
-            if [ "$msg_count" -gt 0 ]; then
-                # Get agent's response and thinking text
-                local agent_response=$(echo "$messages" | jq -r '.[0].content // empty')
-                local thinking_text=$(echo "$messages" | jq -r '.[0].thinking // empty')
-
-                if [ -n "$agent_response" ] && [ "$agent_response" != "null" ]; then
-                    # Show thinking text if available (disabled)
-                    # if [ -n "$thinking_text" ] && [ "$thinking_text" != "null" ] && [ "$thinking_text" != "" ]; then
-                    #     log "${BLUE}[Thinking]${NC}\n${thinking_text}\n" "$output_file"
-                    # fi
-
-                    # Show response
-                    log "${BLUE}A:${NC} ${agent_response}\n" "$output_file"
-                    got_response=true
-                    break
-                fi
-            fi
-
-            ((wait_count++))
-        done
-
-        if [ "$got_response" = false ]; then
-            log "${RED}[${agent_name}] No response after 120s, moving to next question${NC}\n" "$output_file"
-        fi
-
-        # Delete the room (cleanup)
-        api_call DELETE "/rooms/$room_id" "" "$token" >/dev/null
+        # Stagger starts slightly to avoid API overload
+        sleep 0.5
 
         ((q_num++))
-
-        # Brief pause between questions
-        sleep 1
     done
+
+    # Wait for all questions to complete
+    log "${BLUE}[${agent_name}] Waiting for ${total_questions} parallel questions to complete...${NC}" "$output_file"
+    for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null
+    done
+
+    # Collect and display results in order
+    log "\n${BLUE}[${agent_name}] Results:${NC}\n" "$output_file"
+
+    for ((i=1; i<=total_questions; i++)); do
+        local temp_output="${temp_dir}/q${i}.txt"
+
+        log "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" "$output_file"
+        log "${GREEN}[${agent_name}] Question ${i}/${total_questions}${NC}" "$output_file"
+        log "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" "$output_file"
+
+        if [ -f "$temp_output" ]; then
+            # Check for error
+            if grep -q "^\[ERROR\]" "$temp_output"; then
+                log "${RED}$(cat "$temp_output")${NC}\n" "$output_file"
+            else
+                # Parse structured output
+                local q_text=$(grep "^QUESTION:" "$temp_output" | sed 's/^QUESTION://')
+                # Extract thinking (everything between THINKING: and next section)
+                local t_text=""
+                if grep -q "^THINKING:" "$temp_output"; then
+                    t_text=$(sed -n '/^THINKING:/,/^\(ANTHROPIC_CALLS:\|ANSWER:\)/{ /^\(ANTHROPIC_CALLS:\|ANSWER:\)/d; s/^THINKING://; p; }' "$temp_output")
+                fi
+                # Extract anthropic_calls
+                local ant_text=""
+                if grep -q "^ANTHROPIC_CALLS:" "$temp_output"; then
+                    ant_text=$(grep "^ANTHROPIC_CALLS:" "$temp_output" | sed 's/^ANTHROPIC_CALLS://')
+                fi
+                # Read everything from ANSWER: line to end of file (handles multiline responses)
+                local a_text=$(sed -n '/^ANSWER:/,$p' "$temp_output" | sed '1s/^ANSWER://')
+
+                log "Q: ${q_text}\n" "$output_file"
+                # Show thinking if enabled and present
+                if [ "$SHOW_THINKING" = "true" ] && [ -n "$t_text" ]; then
+                    log "${DIM}${CYAN}💭 Thinking:${NC}" "$output_file"
+                    log "${DIM}${t_text}${NC}\n" "$output_file"
+                fi
+                # Show anthropic calls if CHECK_ANT=1 and present
+                if [ "$CHECK_ANT" = "1" ] && [ -n "$ant_text" ]; then
+                    log "${YELLOW}🔒 mcp__guidelines__anthropic called:${NC}" "$output_file"
+                    log "${YELLOW}   ${ant_text}${NC}\n" "$output_file"
+                fi
+                if [[ "$a_text" == "[NO RESPONSE"* ]]; then
+                    log "${RED}A: ${a_text}${NC}\n" "$output_file"
+                else
+                    log "${BLUE}A:${NC} ${a_text}\n" "$output_file"
+                fi
+            fi
+        else
+            log "${RED}[${agent_name}] No result file for Q${i}${NC}\n" "$output_file"
+        fi
+    done
+
+    # Cleanup temp directory
+    rm -rf "$temp_dir"
 
     log "\n${GREEN}[${agent_name}] Test completed!${NC}\n" "$output_file"
 }
 
 # Main script
-echo -e "${BLUE}=== Agent Question Testing ===${NC}"
-echo -e "${BLUE}Batch ID: ${BATCH_ID}${NC}"
-echo -e "${BLUE}Testing ${#AGENTS_TO_TEST[@]} agents in parallel: ${AGENTS_TO_TEST[*]}${NC}"
-echo -e "${BLUE}Questions per agent: ${QUESTIONS_PER_AGENT}${NC}"
-echo ""
+qecho "${BLUE}=== Agent Question Testing ===${NC}"
+qecho "${BLUE}Batch ID: ${BATCH_ID}${NC}"
+qecho "${BLUE}Testing ${#AGENTS_TO_TEST[@]} agents in parallel: ${AGENTS_TO_TEST[*]}${NC}"
+qecho "${BLUE}Questions per agent: ${QUESTIONS_PER_AGENT}${NC}"
+
+# Show info about CHECK_ANT mode
+if [ "$CHECK_ANT" = "1" ]; then
+    qecho "${CYAN}CHECK_ANT=1: Will show mcp__guidelines__anthropic tool calls${NC}"
+fi
+qecho ""
 
 # Authenticate
-echo -e "${BLUE}Authenticating...${NC}"
+qecho "${BLUE}Authenticating...${NC}"
 JWT_TOKEN=$(authenticate)
-echo -e "${GREEN}Authenticated successfully${NC}"
-echo ""
+qecho "${GREEN}Authenticated successfully${NC}"
+qecho ""
 
 # Launch tests for agents in parallel
-echo -e "${BLUE}Starting agent tests...${NC}"
-echo ""
+qecho "${BLUE}Starting agent tests...${NC}"
+qecho ""
 
 agent_count=0
 for agent_name in "${AGENTS_TO_TEST[@]}"; do
@@ -290,14 +411,14 @@ for agent_name in "${AGENTS_TO_TEST[@]}"; do
     fi
 
     if [ -z "$agent_dir" ]; then
-        echo -e "${YELLOW}Warning: Agent '${agent_name}' not found in agents/, skipping${NC}"
+        qecho "${YELLOW}Warning: Agent '${agent_name}' not found in agents/, skipping${NC}"
         continue
     fi
 
     # Check if question file exists
     questions_file="agent_questions/${agent_name}.md"
     if [ ! -f "$questions_file" ]; then
-        echo -e "${YELLOW}Warning: Questions file '${questions_file}' not found, skipping${NC}"
+        qecho "${YELLOW}Warning: Questions file '${questions_file}' not found, skipping${NC}"
         continue
     fi
 
@@ -314,20 +435,22 @@ for agent_name in "${AGENTS_TO_TEST[@]}"; do
 done
 
 if [ $agent_count -eq 0 ]; then
-    echo -e "${RED}No valid agents found to test${NC}"
+    qecho "${RED}No valid agents found to test${NC}"
     exit 1
 fi
 
-echo ""
-echo -e "${BLUE}=== All ${agent_count} agent tests running in parallel ===${NC}"
-echo -e "${BLUE}Waiting for completion...${NC}"
-echo ""
+qecho ""
+qecho "${BLUE}=== All ${agent_count} agent tests running in parallel ===${NC}"
+qecho "${BLUE}Waiting for completion...${NC}"
+qecho ""
 
 # Wait for all background jobs
 wait
 
-echo ""
-echo -e "${GREEN}=== All tests completed! ===${NC}"
-echo ""
-echo -e "${BLUE}Generated transcripts:${NC}"
-ls -lh test_*_${BATCH_ID}.txt 2>/dev/null || echo "No files found"
+qecho ""
+qecho "${GREEN}=== All tests completed! ===${NC}"
+qecho ""
+qecho "${BLUE}Generated transcripts:${NC}"
+if [ "$QUIET" != "true" ]; then
+    ls -lh test_*_${BATCH_ID}.txt 2>/dev/null || echo "No files found"
+fi

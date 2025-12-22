@@ -157,7 +157,7 @@ class TestCriticMessages:
         from models import Agent, Message
 
         # Create a critic agent
-        critic = Agent(name="critic_agent", system_prompt="You are a critic.", is_critic=True)
+        critic = Agent(name="critic_agent", system_prompt="You are a critic.", is_critic=1)
         test_db.add(critic)
         await test_db.commit()
         await test_db.refresh(critic)
@@ -232,32 +232,48 @@ class TestGuestMessageRestrictions:
 
     @pytest.mark.integration
     @pytest.mark.api
-    async def test_guest_can_send_messages(self, guest_client, sample_guest_room):
-        """Test that guest can send messages."""
+    async def test_guest_can_send_messages(self, guest_client, test_db):
+        """Test that guest can send messages to their own room."""
+        from models import Room
+
         client, token = guest_client
 
+        # Create a room owned by the guest
+        guest_room = Room(name="guest_test_room", owner_id="guest-test")
+        test_db.add(guest_room)
+        await test_db.commit()
+        await test_db.refresh(guest_room)
+
         response = await client.post(
-            f"/rooms/{sample_guest_room.id}/messages/send", json={"content": "Guest message", "role": "user"}
+            f"/rooms/{guest_room.id}/messages/send", json={"content": "Guest message", "role": "user"}
         )
 
         assert response.status_code == 200
 
     @pytest.mark.integration
     @pytest.mark.api
-    async def test_guest_can_poll_messages(self, guest_client, sample_guest_room):
-        """Test that guest can poll for messages."""
+    async def test_guest_can_poll_messages(self, guest_client, test_db):
+        """Test that guest can poll for messages in their own room."""
+        from models import Room
+
         client, token = guest_client
 
-        response = await client.get(f"/rooms/{sample_guest_room.id}/messages/poll", params={"since_id": 0})
+        # Create a room owned by the guest
+        guest_room = Room(name="guest_poll_room", owner_id="guest-test")
+        test_db.add(guest_room)
+        await test_db.commit()
+        await test_db.refresh(guest_room)
+
+        response = await client.get(f"/rooms/{guest_room.id}/messages/poll", params={"since_id": 0})
 
         assert response.status_code == 200
 
     @pytest.mark.integration
     @pytest.mark.api
-    async def test_guest_cannot_delete_messages(self, guest_client, sample_guest_room):
+    async def test_guest_cannot_delete_messages(self, guest_client, sample_room):
         """Test that guest cannot delete messages."""
         client, token = guest_client
 
-        response = await client.delete(f"/rooms/{sample_guest_room.id}/messages")
+        response = await client.delete(f"/rooms/{sample_room.id}/messages")
 
         assert response.status_code == 403

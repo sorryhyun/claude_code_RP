@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { api } from '../utils/api';
+import { api } from '../services';
 import type { AgentConfig } from '../types';
 
 /**

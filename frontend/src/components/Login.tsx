@@ -1,12 +1,21 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, MessageSquare } from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 export const Login: React.FC = () => {
+  const { t } = useTranslation('auth');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { login, error } = useAuth();
@@ -34,33 +43,30 @@ export const Login: React.FC = () => {
       <div className="max-w-md w-full">
         {/* Logo/Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent mb-4">
-            <MessageSquare className="w-8 h-8 text-accent-foreground" />
-          </div>
           <h1 className="text-4xl font-bold text-foreground mb-2">
-            Claude Code RP
+            {t('title')}
           </h1>
           <p className="text-muted-foreground">
-            Multi-Agent Role Play
+            {t('subtitle')}
           </p>
         </div>
 
         {/* Login Card */}
-        <Card className="border-border bg-card">
+        <Card className="shadow-xl">
           <CardHeader>
-            <CardTitle className="text-2xl">Welcome</CardTitle>
-            <CardDescription>Enter your password to continue</CardDescription>
+            <CardTitle className="text-2xl">{t('welcome')}</CardTitle>
+            <CardDescription>{t('enterPassword')}</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t('password')}</Label>
                 <Input
                   type="password"
                   id="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
+                  placeholder={t('passwordPlaceholder')}
                   disabled={isSubmitting}
                   autoFocus
                 />
@@ -77,23 +83,19 @@ export const Login: React.FC = () => {
               <Button
                 type="submit"
                 disabled={isSubmitting || !password.trim()}
-                className="w-full bg-accent hover:bg-accent/90"
+                className="w-full"
               >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Logging in...
-                  </>
-                ) : (
-                  'Login'
-                )}
+                {isSubmitting ? t('loggingIn') : t('login')}
               </Button>
             </form>
           </CardContent>
-          <CardFooter className="border-t border-border pt-6">
-            <p className="text-xs text-muted-foreground text-center w-full">
-              Your session will be saved automatically
+          <CardFooter className="flex-col gap-4 border-t pt-6">
+            <p className="text-xs text-muted-foreground">
+              {t('sessionSaved')}
             </p>
+            <div className="w-full max-w-[200px]">
+              <LanguageSwitcher />
+            </div>
           </CardFooter>
         </Card>
       </div>

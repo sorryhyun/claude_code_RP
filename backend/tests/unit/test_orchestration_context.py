@@ -10,6 +10,13 @@ from unittest.mock import Mock, patch
 from orchestration.context import build_conversation_context
 
 
+def extract_text_from_blocks(content_blocks: list) -> str:
+    """Helper to extract text content from content blocks for testing."""
+    if not content_blocks:
+        return ""
+    return "\n".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
+
+
 class TestBuildConversationContext:
     """Tests for build_conversation_context function."""
 
@@ -20,73 +27,83 @@ class TestBuildConversationContext:
             "conversation_context": {
                 "header": "Conversation:",
                 "footer": "",
-                "response_instruction_default": "Respond naturally.",
             }
         }
 
-        context = build_conversation_context([])
+        content_blocks = build_conversation_context([])
 
-        assert context == ""
+        assert content_blocks == []
 
     @patch("orchestration.context.get_conversation_context_config")
-    def test_build_context_with_user_messages(self, mock_get_config):
+    @patch("orchestration.context._settings")
+    def test_build_context_with_user_messages(self, mock_settings, mock_get_config):
         """Test building context with user messages."""
         mock_get_config.return_value = {
             "conversation_context": {
                 "header": "Conversation:",
                 "footer": "",
-                "response_instruction_default": "Respond naturally.",
             }
         }
 
-        # Create mock messages
-        msg1 = Mock(role="user", content="Hello!", participant_type="user", participant_name=None, agent_id=None)
+        # Mock the settings object to return our test user name
+        mock_settings.user_name = "TestUser"
 
-        msg2 = Mock(role="user", content="How are you?", participant_type="user", participant_name=None, agent_id=None)
+        # Create mock messages with image_data=None to avoid Mock truthiness
+        msg1 = Mock(
+            role="user",
+            content="Hello!",
+            participant_type="user",
+            participant_name=None,
+            agent_id=None,
+            image_data=None,
+        )
 
-        with patch.dict(os.environ, {"USER_NAME": "TestUser"}):
-            from core import reset_settings
+        msg2 = Mock(
+            role="user",
+            content="How are you?",
+            participant_type="user",
+            participant_name=None,
+            agent_id=None,
+            image_data=None,
+        )
 
-            reset_settings()
-            context = build_conversation_context([msg1, msg2])
+        content_blocks = build_conversation_context([msg1, msg2])
+        context = extract_text_from_blocks(content_blocks)
 
         assert "Conversation:" in context
-        assert "TestUser: Hello!" in context
-        assert "TestUser: How are you?" in context
-        assert "Respond naturally." in context
+        assert "<TestUser>Hello!</TestUser>" in context
+        assert "<TestUser>How are you?</TestUser>" in context
 
     @patch("orchestration.context.get_conversation_context_config")
     def test_build_context_with_agent_messages(self, mock_get_config):
         """Test building context with agent messages."""
-        mock_get_config.return_value = {
-            "conversation_context": {"header": "Conversation:", "footer": "", "response_instruction_default": ""}
-        }
+        mock_get_config.return_value = {"conversation_context": {"header": "Conversation:", "footer": ""}}
 
         # Create mock agent with name attribute properly set
         mock_agent = Mock()
         mock_agent.name = "Alice"
 
-        msg = Mock(role="assistant", content="Hi there!", agent_id=1, agent=mock_agent)
+        msg = Mock(role="assistant", content="Hi there!", agent_id=1, agent=mock_agent, image_data=None)
 
-        context = build_conversation_context([msg])
+        content_blocks = build_conversation_context([msg])
+        context = extract_text_from_blocks(content_blocks)
 
-        assert "Alice: Hi there!" in context
+        assert "<Alice>Hi there!</Alice>" in context
 
     @patch("orchestration.context.get_conversation_context_config")
     def test_build_context_skips_skip_messages(self, mock_get_config):
         """Test that skip messages are excluded from context."""
-        mock_get_config.return_value = {
-            "conversation_context": {"header": "Conversation:", "footer": "", "response_instruction_default": ""}
-        }
+        mock_get_config.return_value = {"conversation_context": {"header": "Conversation:", "footer": ""}}
 
         # Import SKIP_MESSAGE_TEXT
-        from config.constants import SKIP_MESSAGE_TEXT
+        from core.settings import SKIP_MESSAGE_TEXT
 
-        msg1 = Mock(role="assistant", content=SKIP_MESSAGE_TEXT, agent_id=1, agent=Mock(name="Alice"))
+        msg1 = Mock(role="assistant", content=SKIP_MESSAGE_TEXT, agent_id=1, agent=Mock(name="Alice"), image_data=None)
 
-        msg2 = Mock(role="assistant", content="Real message", agent_id=2, agent=Mock(name="Bob"))
+        msg2 = Mock(role="assistant", content="Real message", agent_id=2, agent=Mock(name="Bob"), image_data=None)
 
-        context = build_conversation_context([msg1, msg2])
+        content_blocks = build_conversation_context([msg1, msg2])
+        context = extract_text_from_blocks(content_blocks)
 
         # Should not include skip message
         assert SKIP_MESSAGE_TEXT not in context
@@ -95,20 +112,19 @@ class TestBuildConversationContext:
     @patch("orchestration.context.get_conversation_context_config")
     def test_build_context_with_agent_id_filter(self, mock_get_config):
         """Test building context with agent_id filter (only new messages)."""
-        mock_get_config.return_value = {
-            "conversation_context": {"header": "Conversation:", "footer": "", "response_instruction_default": ""}
-        }
+        mock_get_config.return_value = {"conversation_context": {"header": "Conversation:", "footer": ""}}
 
         # Create messages before and after agent's last response
         messages = [
-            Mock(role="user", content="Message 1", agent_id=None, participant_type="user"),
-            Mock(role="assistant", content="Agent response", agent_id=1, agent=Mock(name="Alice")),
-            Mock(role="user", content="Message 2", agent_id=None, participant_type="user"),
-            Mock(role="user", content="Message 3", agent_id=None, participant_type="user"),
+            Mock(role="user", content="Message 1", agent_id=None, participant_type="user", image_data=None),
+            Mock(role="assistant", content="Agent response", agent_id=1, agent=Mock(name="Alice"), image_data=None),
+            Mock(role="user", content="Message 2", agent_id=None, participant_type="user", image_data=None),
+            Mock(role="user", content="Message 3", agent_id=None, participant_type="user", image_data=None),
         ]
 
         with patch.dict(os.environ, {"USER_NAME": "User"}):
-            context = build_conversation_context(messages, agent_id=1)
+            content_blocks = build_conversation_context(messages, agent_id=1)
+            context = extract_text_from_blocks(content_blocks)
 
         # Should only include messages after agent's last response
         assert "Message 1" not in context
@@ -119,16 +135,16 @@ class TestBuildConversationContext:
     @patch("orchestration.context.get_conversation_context_config")
     def test_build_context_with_limit(self, mock_get_config):
         """Test building context respects message limit."""
-        mock_get_config.return_value = {
-            "conversation_context": {"header": "", "footer": "", "response_instruction_default": ""}
-        }
+        mock_get_config.return_value = {"conversation_context": {"header": "", "footer": ""}}
 
         # Create many messages
         messages = [
-            Mock(role="user", content=f"Message {i}", agent_id=None, participant_type="user") for i in range(100)
+            Mock(role="user", content=f"Message {i}", agent_id=None, participant_type="user", image_data=None)
+            for i in range(100)
         ]
 
-        context = build_conversation_context(messages, limit=5)
+        content_blocks = build_conversation_context(messages, limit=5)
+        context = extract_text_from_blocks(content_blocks)
 
         # Should only include last 5 messages (+ header/footer)
         assert "Message 95" in context
@@ -139,9 +155,7 @@ class TestBuildConversationContext:
     @patch("orchestration.context.get_conversation_context_config")
     def test_build_context_with_character_participant(self, mock_get_config):
         """Test building context with character participant type."""
-        mock_get_config.return_value = {
-            "conversation_context": {"header": "", "footer": "", "response_instruction_default": ""}
-        }
+        mock_get_config.return_value = {"conversation_context": {"header": "", "footer": ""}}
 
         msg = Mock(
             role="user",
@@ -149,19 +163,19 @@ class TestBuildConversationContext:
             participant_type="character",
             participant_name="Charlie",
             agent_id=None,
+            image_data=None,
         )
 
-        context = build_conversation_context([msg])
+        content_blocks = build_conversation_context([msg])
+        context = extract_text_from_blocks(content_blocks)
 
         # Should use participant_name as speaker
-        assert "Charlie: Hello from character!" in context
+        assert "<Charlie>Hello from character!</Charlie>" in context
 
     @patch("orchestration.context.get_conversation_context_config")
     def test_build_context_with_situation_builder(self, mock_get_config):
         """Test building context with situation_builder participant."""
-        mock_get_config.return_value = {
-            "conversation_context": {"header": "", "footer": "", "response_instruction_default": ""}
-        }
+        mock_get_config.return_value = {"conversation_context": {"header": "", "footer": ""}}
 
         msg = Mock(
             role="user",
@@ -169,75 +183,75 @@ class TestBuildConversationContext:
             participant_type="situation_builder",
             participant_name=None,
             agent_id=None,
+            image_data=None,
         )
 
-        context = build_conversation_context([msg])
+        content_blocks = build_conversation_context([msg])
+        context = extract_text_from_blocks(content_blocks)
 
-        # Should use "Situation Builder" as speaker
-        assert "Situation Builder: Scenario description" in context
+        # Should use "Situation Builder" as speaker (with underscores for valid XML)
+        assert "<Situation_Builder>Scenario description</Situation_Builder>" in context
 
     @patch("orchestration.context.get_conversation_context_config")
     @patch("orchestration.context.format_with_particles")
-    def test_build_context_one_on_one_with_user_instruction(self, mock_format_particles, mock_get_config):
-        """Test 1-on-1 conversation instruction with user."""
+    def test_build_context_with_response_instruction(self, mock_format_particles, mock_get_config):
+        """Test response instruction is added when agent_name is provided."""
         mock_get_config.return_value = {
             "conversation_context": {
                 "header": "",
                 "footer": "",
-                "response_instruction_with_user": "Respond to {user_name}.",
-            }
-        }
-        mock_format_particles.return_value = "Respond to TestUser."
-
-        msg = Mock(role="user", content="Hello", participant_type="user", participant_name=None, agent_id=None)
-
-        context = build_conversation_context([msg], agent_name="Alice", agent_count=1, user_name="TestUser")
-
-        # Should use 1-on-1 instruction template
-        mock_format_particles.assert_called_once()
-        assert "Respond to TestUser." in context
-
-    @patch("orchestration.context.get_conversation_context_config")
-    @patch("orchestration.context.format_with_particles")
-    def test_build_context_multi_agent_instruction(self, mock_format_particles, mock_get_config):
-        """Test multi-agent conversation instruction."""
-        mock_get_config.return_value = {
-            "conversation_context": {
-                "header": "",
-                "footer": "",
-                "response_instruction_with_agent": "Respond as {agent_name}.",
+                "response_instruction": "Respond as {agent_name}.",
             }
         }
         mock_format_particles.return_value = "Respond as Alice."
 
-        msg = Mock(role="user", content="Hello everyone", participant_type="user", participant_name=None, agent_id=None)
-
-        context = build_conversation_context(
-            [msg],
-            agent_name="Alice",
-            agent_count=3,  # Multiple agents
+        msg = Mock(
+            role="user", content="Hello", participant_type="user", participant_name=None, agent_id=None, image_data=None
         )
 
-        # Should use multi-agent instruction template
+        content_blocks = build_conversation_context([msg], agent_name="Alice")
+        context = extract_text_from_blocks(content_blocks)
+
+        # Should use response instruction template
         mock_format_particles.assert_called_once()
         assert "Respond as Alice." in context
 
     @patch("orchestration.context.get_conversation_context_config")
     def test_build_context_deduplicates_messages(self, mock_get_config):
         """Test that duplicate messages are filtered out."""
-        mock_get_config.return_value = {
-            "conversation_context": {"header": "", "footer": "", "response_instruction_default": ""}
-        }
+        mock_get_config.return_value = {"conversation_context": {"header": "", "footer": ""}}
 
         # Create duplicate messages
         messages = [
-            Mock(role="user", content="Same message", agent_id=None, participant_type="user"),
-            Mock(role="user", content="Same message", agent_id=None, participant_type="user"),
-            Mock(role="user", content="Different message", agent_id=None, participant_type="user"),
+            Mock(
+                role="user",
+                content="Same message",
+                agent_id=None,
+                participant_type="user",
+                participant_name=None,
+                image_data=None,
+            ),
+            Mock(
+                role="user",
+                content="Same message",
+                agent_id=None,
+                participant_type="user",
+                participant_name=None,
+                image_data=None,
+            ),
+            Mock(
+                role="user",
+                content="Different message",
+                agent_id=None,
+                participant_type="user",
+                participant_name=None,
+                image_data=None,
+            ),
         ]
 
         with patch.dict(os.environ, {"USER_NAME": "User"}):
-            context = build_conversation_context(messages)
+            content_blocks = build_conversation_context(messages)
+            context = extract_text_from_blocks(content_blocks)
 
         # Should only include "Same message" once
         assert context.count("Same message") == 1

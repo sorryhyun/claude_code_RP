@@ -1,0 +1,98 @@
+{
+  "title": "How to Use ChitChats",
+  "subtitle": "Complete guide for agents and app usage",
+  "gotIt": "Got it!",
+  "tabs": {
+    "gettingStarted": "Getting Started",
+    "agentConfig": "Agent Config",
+    "appUsage": "App Usage"
+  },
+  "gettingStarted": {
+    "whatIsTitle": "What is ChitChats?",
+    "whatIsDesc": "ChitChats is a multi-Claude chat room application where multiple AI agents with different personalities can interact in real-time chat rooms. Each agent is powered by Claude and can be customized with unique characteristics, backgrounds, and behaviors.",
+    "quickStartTitle": "Quick Start",
+    "createRoom": "Click the + button in the Chatrooms tab to create a new conversation space",
+    "addAgents": "Use the agent manager in the chat room to add AI participants",
+    "startChatting": "Send messages and watch agents respond based on their personalities",
+    "manageAgents": "Click on any agent in the Agents tab to view or edit their profile",
+    "keyConcepts": "Key Concepts",
+    "conceptAgents": "AI characters with unique personalities configured via markdown files",
+    "conceptRooms": "Chat spaces where you and agents can have conversations",
+    "conceptThirdPerson": "Agent configs use third-person perspective (e.g., \"Alice is...\" not \"You are...\")",
+    "conceptHotReload": "Edit agent files directly and changes apply immediately"
+  },
+  "agentConfig": {
+    "folderStructure": "Agent Folder Structure",
+    "folderDesc": "Each agent is configured using markdown files in a folder:",
+    "requiredFiles": "Required Files",
+    "inANutshellDesc": "A brief summary of the agent's identity. Example: \"Dr. Sarah Chen is a seasoned data scientist specializing in ML.\"",
+    "characteristicsDesc": "Detailed personality traits, communication style, quirks, and behavioral patterns.",
+    "thirdPersonTitle": "Third-Person Perspective",
+    "thirdPersonDesc": "Agent files must use third-person perspective. This is critical for proper roleplay.",
+    "correct": "Correct",
+    "correctExample": "\"Frieren is an elven mage who has lived for over 1000 years...\"",
+    "wrong": "Wrong",
+    "wrongExample": "\"You are Frieren, an elven mage...\"",
+    "profilePictures": "Profile Pictures",
+    "profilePicturesDesc": "Add an image file to the agent folder. Supported formats:",
+    "commonFileNames": "Common file names:",
+    "groupConfig": "Group Configuration",
+    "groupConfigDesc": "You can group agents and share configurations using group_* folders:",
+    "creatingAgent": "Creating an Agent",
+    "step1": "Create a folder in agents/ with the agent's name",
+    "step2": "Add in_a_nutshell.md with a brief third-person description",
+    "step3": "Add characteristics.md with personality details",
+    "step4": "Optionally add a profile picture",
+    "step5": "The agent will appear automatically in the Agents tab"
+  },
+  "appUsage": {
+    "creatingRooms": "Creating Rooms",
+    "creatingRoomsSteps": {
+      "click": "Click the + New Chatroom button in the sidebar",
+      "enter": "Enter a name for your room (e.g., \"Coffee Shop Discussion\")",
+      "created": "The room will be created and selected automatically",
+      "rename": "You can rename rooms by clicking on the room header in the chat"
+    },
+    "addingAgents": "Adding Agents to Rooms",
+    "addingAgentsSteps": {
+      "open": "Open a chat room and click the Manage Agents button (group icon)",
+      "browse": "Browse available agents and click to add them to the room",
+      "added": "Added agents will appear in the room's participant list",
+      "remove": "Remove agents by clicking the X next to their name in the manager"
+    },
+    "chatting": "Chatting with Agents",
+    "chattingSteps": {
+      "type": "Type your message in the input field at the bottom",
+      "send": "Press Enter or click Send to submit your message",
+      "respond": "Agents will respond based on their personalities and the conversation context",
+      "thinking": "You can see agent \"thinking\" process while they formulate responses",
+      "multiple": "Multiple agents may respond to a single message based on relevance"
+    },
+    "specialMessages": "Special Message Types",
+    "specialMessagesDesc": "Use prefixes to send different types of messages:",
+    "scenePrefix": "[scene] or [상황] - Set the scene or describe the environment",
+    "oocPrefix": "[ooc] or [괄호] - Out-of-character instructions to agents",
+    "regularMessages": "Regular messages are treated as in-character dialogue",
+    "managingProfiles": "Managing Agent Profiles",
+    "managingProfilesSteps": {
+      "goTo": "Go to the Agents tab in the sidebar",
+      "click": "Click on any agent to view their full profile",
+      "edit": "Edit agent characteristics directly in the modal",
+      "upload": "Upload or change profile pictures",
+      "saved": "Changes are saved immediately to the filesystem"
+    },
+    "searchNav": "Search and Navigation",
+    "searchNavSteps": {
+      "search": "Use the search bar in the Agents tab to find agents by name",
+      "korean": "Supports Korean consonant search (초성 검색)",
+      "hamburger": "Click the hamburger menu to show/hide the sidebar",
+      "mobile": "On mobile, the sidebar opens as a drawer"
+    },
+    "keyboardShortcuts": "Keyboard Shortcuts",
+    "shortcuts": {
+      "escape": "Escape - Close modals and sidebars",
+      "enter": "Enter - Send message",
+      "shiftEnter": "Shift + Enter - New line in message"
+    }
+  }
+}

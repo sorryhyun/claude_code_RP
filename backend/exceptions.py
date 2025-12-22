@@ -1,5 +1,5 @@
 """
-Custom exception classes for the Claude Code Role Play application.
+Custom exception classes for the ChitChats application.
 
 These exceptions provide more specific error handling and better error messages
 for common failure scenarios in the application.

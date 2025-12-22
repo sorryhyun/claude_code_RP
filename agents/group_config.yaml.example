@@ -1,0 +1,47 @@
+# Group Configuration Template
+# Place this file as `group_config.yaml` in group folders (e.g., agents/group_슈타게/group_config.yaml)
+# to override tool configurations from tools.yaml for all agents in this group.
+#
+# This follows the same structure as backend/config/tools/tools.yaml
+# Any fields specified here will override the global defaults for this group's agents.
+
+# Enable interrupt_every_turn for all agents in this group
+# When true, agents in this group will always get a turn immediately after any response
+# Example conversation flow with interrupt_every_turn: true
+#   User: "Hello"
+#   Agent A: "Hi there!"
+#   [Interrupt agent responds immediately]
+#   Narrator: "Agent A greeted the user"
+#   Agent B: "Hey!"
+#   [Interrupt agent responds again]
+#   Narrator: "Agent B also greeted"
+# interrupt_every_turn: false  # Default: false
+
+# Set priority for all agents in this group
+# Higher priority agents respond first (both in initial and follow-up rounds)
+# Priority values: 0 (normal/default), 1-10 (higher = more priority)
+# Example: priority: 5 makes this group's agents respond before priority: 3 agents
+# Note: Replaces deprecated PRIORITY_AGENTS environment variable
+# priority: 0  # Default: 0 (normal priority)
+
+# Example: Override recall tool to return memories verbatim without AI rephrasing
+# tools:
+#   recall:
+#     response: "{memory_content}"  # Just return raw content, no wrapper text
+#
+# Example: Add custom prefix/suffix to recalled memories
+# tools:
+#   recall:
+#     response: "**기억을 떠올렸다:**\n{memory_content}"
+#
+# Example: Override skip tool response
+# tools:
+#   skip:
+#     response: "Group-specific skip message for this group."
+#
+# Example: Override memorize tool description
+# tools:
+#   memorize:
+#     description: "Custom description for this group's memorize behavior"
+
+tools: {}  # Add your tool overrides here

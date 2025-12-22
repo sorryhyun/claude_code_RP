@@ -10,7 +10,7 @@ dependencies = [
     "APScheduler==3.10.4",
     "bcrypt==4.2.1",
     "PyJWT==2.10.1",
-    "claude-agent-sdk==0.1.10",
+    "claude-agent-sdk==0.1.18",
     "anyio==4.11.0",
     "certifi==2025.10.5",
     "click==8.3.0",
@@ -36,7 +36,9 @@ dependencies = [
     "typing_extensions==4.15.0",
     "uvicorn==0.38.0",
     "pytest>=8.3.3",
-    "aiohttp"
+    "aiohttp",
+    "Pillow>=10.0.0",
+    "fastapi-mcp>=0.3.0"
 ]
 
 [dependency-groups]
@@ -48,7 +50,7 @@ dev = [
     "faker>=33.1.0",
     "pre-commit>=4.0.0",
     "ruff>=0.8.4",
-    "pyinstaller>=6.0.0",
+    "aiosqlite>=0.21.0",  # For in-memory test database
 ]
 
 [tool.ruff]
@@ -115,6 +117,3 @@ test-verbose = { shell = "cd backend && pytest -v --cov=backend --cov-report=ter
 
 # Installation
 install-all = { shell = "uv sync && cd frontend && npm install", help = "Install all dependencies (backend + frontend)" }
-
-# Build
-build-exe = { shell = "cd frontend && npm run build && cd .. && pyinstaller ClaudeCodeRP.spec --noconfirm", help = "Build Windows executable" }

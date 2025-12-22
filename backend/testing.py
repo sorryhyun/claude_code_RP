@@ -110,7 +110,7 @@ def create_test_app(
         ):
             yield
 
-    app = FastAPI(title="Claude Code Role Play API (Test)", lifespan=_lifespan)
+    app = FastAPI(title="ChitChats API (Test)", lifespan=_lifespan)
     app.state.limiter = limiter
 
     # Add CORS middleware

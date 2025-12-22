@@ -21,7 +21,7 @@ class SuppressPollingLogsFilter(logging.Filter):
         return True
 
 
-def setup_logging(debug_mode: bool = False, log_level: Optional[int] = None) -> None:
+def setup_logging(debug_mode: bool = True, log_level: Optional[int] = None) -> None:
     """
     Configure application-wide logging.
 
@@ -47,9 +47,6 @@ def setup_logging(debug_mode: bool = False, log_level: Optional[int] = None) -> 
     # Apply filter to uvicorn access logger to suppress polling endpoints
     uvicorn_logger = logging.getLogger("uvicorn.access")
     uvicorn_logger.addFilter(SuppressPollingLogsFilter())
-
-    # Suppress aiosqlite debug logs even in debug mode (too noisy)
-    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
     # Log the configuration
     logger = logging.getLogger("Logging")

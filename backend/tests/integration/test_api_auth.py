@@ -39,7 +39,7 @@ class TestAuthEndpoints:
     @pytest.mark.auth
     async def test_health_check_public(self, client: AsyncClient):
         """Test health check endpoint is publicly accessible."""
-        response = await client.get("/health")
+        response = await client.get("/auth/health")
 
         assert response.status_code == 200
         data = response.json()

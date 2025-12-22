@@ -10,29 +10,13 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from core import get_settings
-from core.paths import get_agents_dir, get_work_dir
 from domain.agent_config import AgentConfigData
-from domain.memory import MemoryPolicy
-from utils.memory_parser import parse_long_term_memory
+from sdk.memory.parser import parse_long_term_memory
 
 logger = logging.getLogger("ConfigParser")
 
 # Get settings singleton
 _settings = get_settings()
-
-# Get memory mode service
-from services.memory_mode_service import get_memory_mode_service
-
-_memory_service = get_memory_mode_service()
-
-# Global configuration from settings (kept for backwards compatibility)
-# New code should use get_memory_mode_service() directly
-MEMORY_MODE = _memory_service.mode.value
-RECALL_MEMORY_FILE = _memory_service.memory_file
-GUIDELINE_READ_MODE = _settings.read_guideline_by
-
-# Log configuration (memory mode is logged by the service)
-logger.info(f"Guideline read mode: {GUIDELINE_READ_MODE}")
 
 
 def parse_agent_config(file_path: str) -> Optional[AgentConfigData]:
@@ -55,7 +39,9 @@ def parse_agent_config(file_path: str) -> Optional[AgentConfigData]:
     # Resolve path relative to project root if not absolute
     path = Path(file_path)
     if not path.is_absolute():
-        path = get_work_dir() / file_path
+        backend_dir = Path(__file__).parent.parent
+        project_root = backend_dir.parent
+        path = project_root / file_path
 
     if not path.exists() or not path.is_dir():
         return None
@@ -98,66 +84,17 @@ def _parse_folder_config(folder_path: Path) -> AgentConfigData:
 
         return None
 
-    # Parse long-term memory file based on environment configuration
-    # Support both "long_term_memory.md" and "consolidated_memory.md"
-    memory_filename = f"{RECALL_MEMORY_FILE}.md"
+    # Parse long-term memory file for recall tool
+    memory_filename = f"{_settings.recall_memory_file}.md"
     long_term_memory_file = folder_path / memory_filename
     long_term_memory_index = None
     long_term_memory_subtitles = None
-    memory_brain_enabled = False
-    memory_brain_policy = "balanced"
 
-    # GLOBAL OVERRIDE: MEMORY_MODE determines which system to use
-    # This overrides per-agent memory_brain.md configurations
-    if MEMORY_MODE == "RECALL":
-        # RECALL MODE: Load memory index for recall tool, disable memory brain
-        if long_term_memory_file.exists():
-            long_term_memory_index = parse_long_term_memory(long_term_memory_file)
-            if long_term_memory_index:
-                # Create a comma-separated list of subtitles for context injection
-                long_term_memory_subtitles = ", ".join(f"'{s}'" for s in long_term_memory_index.keys())
-        # Memory brain is always disabled in RECALL mode (global override)
-        memory_brain_enabled = False
-
-    elif MEMORY_MODE == "BRAIN":
-        # BRAIN MODE: Load memory index for brain, check if brain config exists
-        if long_term_memory_file.exists():
-            long_term_memory_index = parse_long_term_memory(long_term_memory_file)
-            if long_term_memory_index:
-                logger.debug(
-                    f"[BRAIN MODE] Loaded {len(long_term_memory_index)} long-term memories from {folder_path.name}/{memory_filename}"
-                )
-
-        # Parse memory-brain configuration from memory_brain.md
-        memory_brain_file = folder_path / "memory_brain.md"
-        if memory_brain_file.exists():
-            memory_brain_content = read_section("memory_brain.md").lower()
-            # Check if memory-brain is enabled
-            if "enabled: true" in memory_brain_content or "enabled:true" in memory_brain_content:
-                memory_brain_enabled = True
-                # Extract policy (look for "policy: <value>")
-                for line in memory_brain_content.split("\n"):
-                    if "policy:" in line:
-                        policy = line.split("policy:")[1].strip()
-                        if policy in ["balanced", "trauma_biased", "genius_planner", "optimistic", "avoidant"]:
-                            memory_brain_policy = policy
-                        break
-                logger.debug(
-                    f"[BRAIN MODE] Memory brain enabled for {folder_path.name} with policy: {memory_brain_policy}"
-                )
-            else:
-                logger.debug(f"[BRAIN MODE] Memory brain config exists but not enabled for {folder_path.name}")
-        else:
-            # In BRAIN mode, if no memory_brain.md exists, we can still use default settings
-            # But let's not enable it by default - only if explicitly configured
-            logger.debug(f"[BRAIN MODE] No memory_brain.md found for {folder_path.name}, memory brain disabled")
-
-    # Convert string policy to MemoryPolicy enum
-    policy_enum = MemoryPolicy.BALANCED
-    try:
-        policy_enum = MemoryPolicy(memory_brain_policy.lower())
-    except (ValueError, AttributeError):
-        policy_enum = MemoryPolicy.BALANCED
+    if long_term_memory_file.exists():
+        long_term_memory_index = parse_long_term_memory(long_term_memory_file)
+        if long_term_memory_index:
+            # Create a comma-separated list of subtitles for context injection
+            long_term_memory_subtitles = ", ".join(f"'{s}'" for s in long_term_memory_index.keys())
 
     return AgentConfigData(
         in_a_nutshell=read_section("in_a_nutshell.md"),
@@ -166,8 +103,6 @@ def _parse_folder_config(folder_path: Path) -> AgentConfigData:
         profile_pic=find_profile_pic(),
         long_term_memory_index=long_term_memory_index,
         long_term_memory_subtitles=long_term_memory_subtitles,
-        memory_brain_enabled=memory_brain_enabled,
-        memory_brain_policy=policy_enum,
     )
 
 
@@ -184,9 +119,10 @@ def list_available_configs() -> Dict[str, Dict[str, Optional[str]]]:
         - "path": str (relative path to agent folder)
         - "group": Optional[str] (group name if in a group folder, None otherwise)
     """
-    # Get paths (handles both dev and frozen exe modes)
-    work_dir = get_work_dir()
-    agents_dir = get_agents_dir()
+    # Get the project root directory (parent of backend/)
+    backend_dir = Path(__file__).parent.parent
+    project_root = backend_dir.parent
+    agents_dir = project_root / "agents"
 
     if not agents_dir.exists():
         return {}
@@ -210,13 +146,13 @@ def list_available_configs() -> Dict[str, Dict[str, Optional[str]]]:
                     # Verify it has at least one required config file
                     if any((agent_item / f).exists() for f in required_files):
                         agent_name = agent_item.name
-                        relative_path = agent_item.relative_to(work_dir)
+                        relative_path = agent_item.relative_to(project_root)
                         configs[agent_name] = {"path": str(relative_path), "group": group_name}
         else:
             # Regular agent folder (not in a group)
             if any((item / f).exists() for f in required_files):
                 agent_name = item.name
-                relative_path = item.relative_to(work_dir)
+                relative_path = item.relative_to(project_root)
                 configs[agent_name] = {"path": str(relative_path), "group": None}
 
     return configs

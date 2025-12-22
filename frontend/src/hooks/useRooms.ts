@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { api, getApiKey } from '../utils/api';
+import { api } from '../services';
+import { useAuth } from '../contexts/AuthContext';
 import type { RoomSummary, Room } from '../types';
 
 interface UseRoomsReturn {
@@ -13,14 +14,14 @@ interface UseRoomsReturn {
   markRoomAsReadOptimistic: (roomId: number) => void;
 }
 
-const POLL_INTERVAL = 2000; // Poll every 2 seconds
+const POLL_INTERVAL = 5000; // Poll every 5 seconds
 
 export const useRooms = (): UseRoomsReturn => {
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const apiKey = getApiKey();
+  const { apiKey } = useAuth();
 
   const fetchRooms = useCallback(async (isInitial = false) => {
     try {
@@ -74,15 +75,58 @@ export const useRooms = (): UseRoomsReturn => {
 
     let isActive = true;
 
+    const doFetch = async (isInitial = false) => {
+      try {
+        if (isInitial) {
+          setLoading(true);
+        }
+        const data = await api.getRooms();
+
+        // Only update state if rooms have actually changed
+        setRooms((prevRooms) => {
+          // Check if data is different
+          if (prevRooms.length !== data.length) {
+            return data;
+          }
+
+          // Check if any room has changed
+          const hasChanges = data.some((newRoom) => {
+            const prevRoom = prevRooms.find(r => r.id === newRoom.id);
+            if (!prevRoom) return true;
+
+            // Compare relevant properties
+            return (
+              prevRoom.name !== newRoom.name ||
+              prevRoom.is_paused !== newRoom.is_paused ||
+              prevRoom.max_interactions !== newRoom.max_interactions ||
+              prevRoom.last_activity_at !== newRoom.last_activity_at ||
+              prevRoom.last_read_at !== newRoom.last_read_at ||
+              prevRoom.has_unread !== newRoom.has_unread
+            );
+          });
+
+          return hasChanges ? data : prevRooms;
+        });
+
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        if (isInitial) {
+          setLoading(false);
+        }
+      }
+    };
+
     // Initial fetch
-    fetchRooms(true);
+    doFetch(true);
 
     // Setup polling using setTimeout to prevent stacking
     const scheduleNextPoll = () => {
       if (!isActive) return;
 
       pollIntervalRef.current = setTimeout(async () => {
-        await fetchRooms(false);
+        await doFetch(false);
         scheduleNextPoll(); // Schedule next poll after this one completes
       }, POLL_INTERVAL);
     };
@@ -97,7 +141,7 @@ export const useRooms = (): UseRoomsReturn => {
         pollIntervalRef.current = null;
       }
     };
-  }, [apiKey, fetchRooms]);
+  }, [apiKey]);
 
   const createRoom = async (name: string): Promise<Room> => {
     try {

@@ -1,0 +1,20 @@
+{
+  "connected": "연결됨",
+  "disconnected": "연결 끊김",
+  "messageAsUser": "{{persona}}(으)로 메시지...",
+  "welcomeTitle": "ChitChats에 오신 것을 환영합니다",
+  "welcomeSubtitle": "채팅방을 만들거나 에이전트를 선택하여 시작하세요",
+  "createChatroom": "채팅방 만들기",
+  "browseAgents": "에이전트 둘러보기",
+  "clickAgentHint": "에이전트를 클릭하여 1:1 대화를 시작하거나, 새 채팅방을 만들어 여러 에이전트와 대화하세요",
+  "roomAgents": "방 에이전트",
+  "resetConversation": "대화 초기화",
+  "resetWarning": "이 작업은 되돌릴 수 없습니다",
+  "resetConfirmMessage": "정말 이 방을 초기화하시겠습니까? 전체 대화 기록이 영구적으로 삭제됩니다.",
+  "reset": "초기화",
+  "conversationReset": "대화가 초기화되었습니다",
+  "messagesRefreshed": "메시지가 새로고침되었습니다",
+  "dropImageHere": "여기에 이미지를 놓으세요",
+  "failedToReset": "대화 초기화 실패",
+  "failedToResetRetry": "대화 초기화에 실패했습니다. 다시 시도해주세요."
+}

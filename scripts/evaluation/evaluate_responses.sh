@@ -13,7 +13,7 @@ NC='\033[0m'
 EVALUATOR="페른"
 CHECKLIST_FILE=""
 ANSWERS_FILE=""
-API_BASE="${BACKEND_URL:-http://localhost:8000}"
+API_BASE="${BACKEND_URL:-http://localhost:8001}"
 OUTPUT_FILE=""
 JWT_TOKEN=""
 PASSWORD=""
@@ -80,7 +80,7 @@ fi
 if [ -f ".env" ] && [ -z "$JWT_TOKEN" ]; then
     JWT_TOKEN=$(grep '^JWT_TOKEN=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
     if [ -z "$PASSWORD" ]; then
-        PASSWORD=$(grep '^CCRP_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
+        PASSWORD=$(grep '^CHITCHATS_PASSWORD=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
     fi
 fi
 

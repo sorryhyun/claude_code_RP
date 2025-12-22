@@ -11,7 +11,7 @@ class TestWriteQueue:
     @pytest.fixture(autouse=True)
     async def setup_and_teardown(self):
         """Setup and teardown for each test."""
-        from utils.write_queue import start_writer, stop_writer
+        from infrastructure.database.write_queue import start_writer, stop_writer
 
         await start_writer()
         yield
@@ -19,7 +19,7 @@ class TestWriteQueue:
 
     async def test_enqueue_write_basic(self):
         """Test basic write enqueueing."""
-        from utils.write_queue import enqueue_write
+        from infrastructure.database.write_queue import enqueue_write
 
         result = []
 
@@ -33,7 +33,7 @@ class TestWriteQueue:
 
     async def test_enqueue_write_serializes_concurrent_calls(self):
         """Test that concurrent writes are serialized."""
-        from utils.write_queue import enqueue_write
+        from infrastructure.database.write_queue import enqueue_write
 
         execution_order = []
 
@@ -60,7 +60,7 @@ class TestWriteQueue:
 
     async def test_enqueue_write_propagates_exceptions(self):
         """Test that exceptions from write operations are propagated."""
-        from utils.write_queue import enqueue_write
+        from infrastructure.database.write_queue import enqueue_write
 
         async def failing_write():
             raise ValueError("test error")
@@ -70,13 +70,13 @@ class TestWriteQueue:
 
     async def test_is_writer_running(self):
         """Test writer status check."""
-        from utils.write_queue import is_writer_running
+        from infrastructure.database.write_queue import is_writer_running
 
         assert is_writer_running() is True
 
     async def test_get_queue_size(self):
         """Test queue size reporting."""
-        from utils.write_queue import get_queue_size
+        from infrastructure.database.write_queue import get_queue_size
 
         # Queue should be empty when no pending writes
         assert get_queue_size() == 0
@@ -87,7 +87,7 @@ class TestWriteQueueNotStarted:
 
     async def test_enqueue_without_queue_executes_directly(self):
         """Test that enqueue falls back to direct execution when queue not started."""
-        from utils.write_queue import enqueue_write
+        from infrastructure.database.write_queue import enqueue_write
 
         result = []
 
@@ -102,12 +102,12 @@ class TestWriteQueueNotStarted:
 
     async def test_is_writer_running_when_stopped(self):
         """Test writer status when not running."""
-        from utils.write_queue import is_writer_running
+        from infrastructure.database.write_queue import is_writer_running
 
         assert is_writer_running() is False
 
     async def test_get_queue_size_when_stopped(self):
         """Test queue size when not running."""
-        from utils.write_queue import get_queue_size
+        from infrastructure.database.write_queue import get_queue_size
 
         assert get_queue_size() == 0

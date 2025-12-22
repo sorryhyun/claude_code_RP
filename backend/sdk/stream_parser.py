@@ -24,6 +24,7 @@ class ParsedStreamMessage:
         session_id: Session ID if found in this message, None otherwise
         skip_used: True if skip tool was called in this message
         memory_entries: List of new memory entries from this message
+        anthropic_calls: List of anthropic tool call arguments from this message
     """
 
     response_text: str
@@ -31,11 +32,12 @@ class ParsedStreamMessage:
     session_id: Optional[str] = None
     skip_used: bool = False
     memory_entries: list[str] = field(default_factory=list)
+    anthropic_calls: list[str] = field(default_factory=list)
 
     @property
     def has_tool_usage(self) -> bool:
         """Check if any tools were used in this message."""
-        return self.skip_used or bool(self.memory_entries)
+        return self.skip_used or bool(self.memory_entries) or bool(self.anthropic_calls)
 
 
 class StreamParser:
@@ -69,6 +71,7 @@ class StreamParser:
         new_session_id = None
         skip_tool_called = False
         memory_entries = []
+        anthropic_calls = []
 
         # Extract session_id from SystemMessage
         if hasattr(message, "__class__") and message.__class__.__name__ == "SystemMessage":
@@ -107,6 +110,15 @@ class StreamParser:
                                 if memory_entry:
                                     memory_entries.append(memory_entry)
                                     logger.info(f"💾 Agent recorded memory: {memory_entry}")
+                        elif tool_name and tool_name.endswith("__anthropic"):
+                            tool_input = getattr(block, "input", None) or (
+                                block.get("input") if isinstance(block, dict) else None
+                            )
+                            if tool_input and isinstance(tool_input, dict):
+                                situation = tool_input.get("situation", "")
+                                if situation:
+                                    anthropic_calls.append(situation)
+                                    logger.info(f"🔒 Agent called anthropic tool: {situation}")
 
                     # Handle thinking blocks
                     block_class_name = block.__class__.__name__ if hasattr(block, "__class__") else ""
@@ -131,4 +143,5 @@ class StreamParser:
             session_id=new_session_id,
             skip_used=skip_tool_called,
             memory_entries=memory_entries,
+            anthropic_calls=anthropic_calls,
         )

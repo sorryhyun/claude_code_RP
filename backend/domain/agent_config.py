@@ -7,8 +7,6 @@ Groups agent configuration fields for clean parameter passing.
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from domain.memory import MemoryPolicy
-
 
 @dataclass
 class AgentConfigData:
@@ -26,8 +24,6 @@ class AgentConfigData:
         profile_pic: Optional profile picture filename
         long_term_memory_index: Dict mapping memory subtitles to their full content
         long_term_memory_subtitles: List of available memory subtitles (for context injection)
-        memory_brain_enabled: Whether to use memory-brain for this agent
-        memory_brain_policy: Memory selection policy (balanced, trauma_biased, etc.)
     """
 
     config_file: Optional[str] = None
@@ -37,8 +33,6 @@ class AgentConfigData:
     profile_pic: Optional[str] = None
     long_term_memory_index: Optional[Dict[str, str]] = None
     long_term_memory_subtitles: Optional[str] = None
-    memory_brain_enabled: bool = False
-    memory_brain_policy: MemoryPolicy = MemoryPolicy.BALANCED
 
     def has_content(self) -> bool:
         """
@@ -74,10 +68,7 @@ class AgentConfigData:
             sections.append(f"## Recent events\n\n{self.recent_events}")
 
         if self.long_term_memory_subtitles:
-            sections.append(
-                f"## Long-term memory index\n\n"
-                f"Available detailed memories (use 'recall' tool to retrieve): {self.long_term_memory_subtitles}"
-            )
+            sections.append(f"## {agent_name}이 가진 기억 index\n\n{self.long_term_memory_subtitles}")
 
         if sections:
             return "\n\n" + "\n\n".join(sections)
@@ -94,14 +85,6 @@ class AgentConfigData:
         Returns:
             AgentConfigData instance
         """
-        # Parse memory_brain_policy if present
-        policy = data.get("memory_brain_policy", "balanced")
-        if isinstance(policy, str):
-            try:
-                policy = MemoryPolicy(policy.lower())
-            except ValueError:
-                policy = MemoryPolicy.BALANCED
-
         return cls(
             config_file=data.get("config_file"),
             in_a_nutshell=data.get("in_a_nutshell"),
@@ -110,6 +93,4 @@ class AgentConfigData:
             profile_pic=data.get("profile_pic"),
             long_term_memory_index=data.get("long_term_memory_index"),
             long_term_memory_subtitles=data.get("long_term_memory_subtitles"),
-            memory_brain_enabled=data.get("memory_brain_enabled", False),
-            memory_brain_policy=policy,
         )

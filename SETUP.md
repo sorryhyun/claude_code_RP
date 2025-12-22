@@ -1,6 +1,6 @@
 # Setup Guide
 
-Complete setup guide for Claude Code Role Play, covering authentication, deployment, and memory systems.
+Complete setup guide for ChitChats, covering authentication, deployment, and memory systems.
 
 ## Quick Start
 
@@ -10,41 +10,15 @@ Complete setup guide for Claude Code Role Play, covering authentication, deploym
 make install
 ```
 
-#### Windows one-click setup
-
-If you want a single PowerShell command that installs uv + Node, creates `.env`, hashes your password, and (optionally) starts the servers:
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File scripts/windows/one_click_setup.ps1 -Password "your_password" -StartServers
-```
-
-The script fetches uv, installs backend/frontend dependencies, writes `API_KEY_HASH` and `JWT_SECRET` to `.env`, and launches both servers. Omit `-StartServers` if you only want to install and configure. `winget` is used when available, but if it is missing or fails the script will silently fall back to downloading the official Node.js LTS MSI and installing it with `msiexec`.
-
-**Prefer an .exe-style installer?** You can wrap the PowerShell script into a single self-extracting binary without changing the app:
-
-```powershell
-# Install the packager (one-time)
-Install-Module -Scope CurrentUser -Name ps2exe -Force
-
-# Build a signed-by-you installer binary
-Invoke-ps2exe scripts/windows/one_click_setup.ps1 ClaudeCodeSetup.exe
-```
-
-This produces `ClaudeCodeSetup.exe` that runs the same steps as the script. Signing or reputation is up to you; the project does not ship an .exe to avoid unsigned binaries and to keep installers versioned by the repo owner.
-
-**CI-built installer artifact:** If you want GitHub Actions to generate the `.exe` for you, trigger the `Build Windows installer` workflow from the Actions tab. It uses `Invoke-ps2exe` on `scripts/windows/one_click_setup.ps1` and uploads `ClaudeCodeSetup.exe` as an artifact (optionally stamping a version string via the workflow input).
-
 ### 2. Configure Authentication
 
-Claude Code Role Play uses JWT token-based authentication with bcrypt password hashing.
+ChitChats uses JWT token-based authentication with bcrypt password hashing.
 
 **Generate password hash:**
 ```bash
 make generate-hash
-# Or manually:
-# cd backend && uv run python generate_hash.py
-# Non-interactive (for scripts/CI):
-# cd backend && uv run python generate_hash.py --password "your_password" --output-only
+# Or directly:
+# uv run python scripts/setup/generate_hash.py
 ```
 
 **Generate JWT secret:**
@@ -84,18 +58,13 @@ Access:
 
 Login with the password you used to generate the hash.
 
-## Memory Systems
+## Memory System
 
-Claude Code Role Play supports **two mutually exclusive memory modes** controlled by `MEMORY_BY` environment variable.
+Agents can use the `recall` tool to fetch specific memories from their long-term memory file when needed.
 
-### RECALL Mode (Default)
-
-**On-demand memory retrieval** - Agents call `recall` tool to fetch specific memories when needed.
-
-**Configuration:**
+**Configuration (optional):**
 ```env
-MEMORY_BY=RECALL
-RECALL_MEMORY_FILE=consolidated_memory  # Optional: default value
+RECALL_MEMORY_FILE=consolidated_memory  # Default value
 ```
 
 **Agent structure:**
@@ -123,64 +92,6 @@ More memory content...
 - Flexible memory access
 
 **See [MEMORY_SYSTEMS.md](MEMORY_SYSTEMS.md) for complete documentation.**
-
-### BRAIN Mode
-
-**Automatic memory surfacing** - Separate memory brain agent analyzes context and injects relevant memories before each response.
-
-**Configuration:**
-```env
-MEMORY_BY=BRAIN
-```
-
-**Agent setup:**
-
-Add `memory_brain.md` to agent folder:
-```markdown
-enabled: true
-policy: balanced
-```
-
-Add `long_term_memory.md` with subtitle format:
-```markdown
-## [memory_subtitle]
-Full memory content here...
-
-## [another_memory]
-More content...
-```
-
-**Available policies:**
-- `balanced` - Neutral, context-driven selection
-- `trauma_biased` - Favors painful/difficult memories
-- `genius_planner` - Favors strategic/analytical memories
-- `optimistic` - Favors positive/hopeful memories
-- `avoidant` - Suppresses difficult memories
-
-**Features:**
-- Psychologically realistic memory activation
-- Max 3 memories per turn (configurable)
-- 10-turn cooldown to prevent repetition
-- Activation strength scores for each memory
-
-**Benefits:**
-- Context-driven memory activation
-- Character depth through policy-based selection
-- Dynamic behavior changes when memories surface
-
-**See [MEMORY_SYSTEMS.md](MEMORY_SYSTEMS.md) for complete documentation.**
-
-### Choosing a Memory System
-
-| Feature | RECALL Mode | BRAIN Mode |
-|---------|-------------|------------|
-| Token Cost | Lower baseline | Higher baseline |
-| Control | Agent decides | Automatic |
-| Memory Activation | On-demand | Context-driven |
-| Psychological Realism | Moderate | High |
-| Configuration | Simple | Per-agent policies |
-
-**Default:** If `MEMORY_BY` is not set or has an invalid value, defaults to `RECALL` mode.
 
 ## Deployment
 
@@ -238,7 +149,7 @@ Restart the backend after changing CORS settings.
 
 ## Authentication System
 
-Claude Code Role Play uses JWT token-based authentication with bcrypt password hashing.
+ChitChats uses JWT token-based authentication with bcrypt password hashing.
 
 ### How It Works
 
@@ -272,9 +183,7 @@ Claude Code Role Play uses JWT token-based authentication with bcrypt password h
 - Check backend startup logs for CORS configuration
 
 ### Memory system not working
-- Check `MEMORY_BY` environment variable is set correctly
-- For RECALL mode: Verify `consolidated_memory.md` exists with `## [subtitle]` format
-- For BRAIN mode: Verify `memory_brain.md` has `enabled: true` and `long_term_memory.md` exists
+- Verify `consolidated_memory.md` exists with `## [subtitle]` format
 - Enable `DEBUG_AGENTS=true` to see detailed logs
 
 ### Database issues
@@ -312,7 +221,7 @@ All scripts are now organized in `scripts/` directory:
 
 **Update agent:** Edit `.md` files directly (changes apply immediately)
 
-**Update system prompt:** Edit `system_prompt` section in `backend/config/tools/guidelines.yaml` (changes apply immediately)
+**Update system prompt:** Edit `system_prompt` section in `backend/config/tools/guidelines_3rd.yaml` (changes apply immediately)
 
 **Update tool descriptions:** Edit YAML files in `backend/config/tools/` (changes apply immediately)
 

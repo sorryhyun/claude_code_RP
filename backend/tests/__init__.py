@@ -1,1 +1,1 @@
-"""Claude Code Role Play backend test suite."""
+"""ChitChats backend test suite."""

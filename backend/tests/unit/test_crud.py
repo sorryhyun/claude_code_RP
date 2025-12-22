@@ -58,7 +58,7 @@ class TestRoomCRUD:
         updated_room = await crud.update_room(test_db, sample_room.id, update_data)
 
         assert updated_room.max_interactions == 20
-        assert updated_room.is_paused == True  # noqa: E712
+        assert updated_room.is_paused == True
 
     @pytest.mark.crud
     async def test_delete_room(self, sample_room, test_db):
@@ -439,7 +439,7 @@ class TestCriticMessageOperations:
         from models import Agent, Message
 
         # Create critic agent
-        critic = Agent(name="critic", system_prompt="Test", is_critic=True)
+        critic = Agent(name="critic", system_prompt="Test", is_critic=1)
         test_db.add(critic)
         await test_db.commit()
         await test_db.refresh(critic)

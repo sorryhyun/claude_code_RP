@@ -7,12 +7,16 @@ recent room messages for multi-agent awareness.
 
 from typing import List, Optional
 
-from config.config_loader import get_conversation_context_config
-from config.constants import SKIP_MESSAGE_TEXT
-from config.parser import GUIDELINE_READ_MODE, MEMORY_MODE
+from sdk.config import get_conversation_context_config
 from core import get_settings
-from utils.conversation_utils import detect_conversation_type
-from utils.korean_particles import format_with_particles
+from core.settings import SKIP_MESSAGE_TEXT
+from domain.enums import ParticipantType
+from i18n.korean import format_with_particles
+
+from orchestration.whiteboard import process_messages_for_whiteboard
+
+# Get settings singleton
+_settings = get_settings()
 
 
 def build_conversation_context(
@@ -23,9 +27,12 @@ def build_conversation_context(
     agent_count: Optional[int] = None,
     user_name: Optional[str] = None,
     include_response_instruction: bool = True,
-) -> str:
+) -> List[dict]:
     """
     Build conversation context from recent room messages for multi-agent awareness.
+
+    Returns a list of content blocks (text and image) for native multimodal support.
+    Images are positioned inline within the conversation structure.
 
     Args:
         messages: List of recent messages from the room
@@ -37,10 +44,10 @@ def build_conversation_context(
         include_response_instruction: If True, append response instruction; if False, only include conversation history
 
     Returns:
-        Formatted conversation history string
+        List of content blocks: [{"type": "text", "text": "..."}, {"type": "image", "source": {...}}, ...]
     """
     if not messages:
-        return ""
+        return []
 
     # If agent_id is provided, find messages after the agent's last response
     if agent_id is not None:
@@ -63,15 +70,22 @@ def build_conversation_context(
 
     # If no new messages, return empty
     if not recent_messages:
-        return ""
+        return []
 
     # Load conversation context configuration
     context_config = get_conversation_context_config()
     config = context_config.get("conversation_context", {})
 
-    # Build header
+    # Build content blocks list for multimodal support
+    content_blocks: List[dict] = []
+
+    # Start with header
     header = config.get("header", "Here's the conversation so far:")
-    context_lines = [header]
+    current_text = header + "\n"
+
+    # Process whiteboard messages to get rendered content (accumulated state)
+    # This converts diff format to full rendered whiteboard for other agents
+    whiteboard_rendered = process_messages_for_whiteboard(messages)
 
     # Track seen messages to avoid duplicates (speaker, content) pairs
     seen_messages = set()
@@ -83,19 +97,19 @@ def build_conversation_context(
             continue
 
         # Skip system messages (e.g., "X joined the chat") - these are UI-only notifications
-        if msg.participant_type == "system":
+        if msg.participant_type == ParticipantType.SYSTEM:
             continue
 
         # Format each message with speaker identification
         if msg.role == "user":
-            # Determine speaker based on participant type
-            if msg.participant_type == "character" and msg.participant_name:
+            # Use participant_name if provided, otherwise determine by type
+            if msg.participant_name:
                 speaker = msg.participant_name
-            elif msg.participant_type == "situation_builder":
+            elif msg.participant_type == ParticipantType.SITUATION_BUILDER:
                 speaker = "Situation Builder"
             else:
                 # Default to USER_NAME or "User"
-                speaker = get_settings().user_name
+                speaker = _settings.user_name
         elif msg.agent_id:
             # Get agent name from the message relationship
             speaker = msg.agent.name if hasattr(msg, "agent") and msg.agent else f"Agent {msg.agent_id}"
@@ -110,68 +124,64 @@ def build_conversation_context(
             continue
 
         seen_messages.add(message_key)
-        context_lines.append(f"{speaker}: {msg.content}\n")
+
+        # Get message content (use rendered whiteboard content if available)
+        content = whiteboard_rendered.get(msg.id, msg.content)
+
+        # Convert spaces to underscores for valid XML tags
+        tag_name = speaker.replace(" ", "_")
+
+        # Check if message has an image for native multimodal support
+        has_image = (
+            hasattr(msg, "image_data") and msg.image_data and hasattr(msg, "image_media_type") and msg.image_media_type
+        )
+
+        if has_image:
+            # Add accumulated text as a block, then image inline within the XML tag
+            current_text += f"<{tag_name}>"
+            if current_text.strip():
+                content_blocks.append({"type": "text", "text": current_text})
+
+            # Add native image block
+            content_blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": msg.image_media_type,
+                        "data": msg.image_data,
+                    },
+                }
+            )
+
+            # Continue with content and closing tag
+            if content:
+                current_text = f"\n{content}</{tag_name}>\n"
+            else:
+                current_text = f"</{tag_name}>\n"
+        else:
+            # No image - just add text
+            current_text += f"<{tag_name}>{content}</{tag_name}>\n"
 
     # Add footer (closing tag) after conversation messages
     footer = config.get("footer", "")
     if footer:
-        context_lines.append(footer)
+        current_text += footer + "\n"
 
-    # Add recall tool reminder (only in RECALL mode and when including instructions)
-    if include_response_instruction and MEMORY_MODE == "RECALL":
+    # Add recall tool reminder when including instructions
+    if include_response_instruction:
         recall_reminder = config.get("recall_reminder", "")
         if recall_reminder:
-            context_lines.append(f"\n{recall_reminder}\n")
+            current_text += f"\n{recall_reminder}\n"
 
-    # Add response instruction based on conversation type (if requested)
-    if include_response_instruction:
-        # Determine conversation type using shared utility
-        is_one_on_one, _, _ = detect_conversation_type(recent_messages, agent_count or 0)
+    # Add response instruction (if requested)
+    if include_response_instruction and agent_name:
+        instruction = config.get("response_instruction", "")
+        if instruction:
+            current_text += format_with_particles(instruction, agent_name=agent_name, user_name=user_name or "")
 
-        # Add response instruction based on conversation type
-        # Use _active variants when READ_GUIDELINE_BY=active_tool
-        if agent_name:
-            # Use 1-on-1 template if it's a 1-on-1 conversation and user_name is provided
-            if is_one_on_one and user_name:
-                if GUIDELINE_READ_MODE == "active_tool":
-                    instruction = config.get("response_instruction_with_user_active", "")
-                    # Fallback to regular instruction if _active variant not found
-                    if not instruction:
-                        instruction = config.get("response_instruction_with_user", "")
-                else:
-                    instruction = config.get("response_instruction_with_user", "")
-                if instruction:
-                    context_lines.append(format_with_particles(instruction, agent_name=agent_name, user_name=user_name))
-            else:
-                # Use multi-agent template when there are multiple agents (>1)
-                # Otherwise use standard agent template
-                if agent_count and agent_count > 1:
-                    if GUIDELINE_READ_MODE == "active_tool":
-                        instruction = config.get("response_instruction_with_multi_agent_active", "")
-                        # Fallback to regular agent instruction if multi_agent variant not found
-                        if not instruction:
-                            instruction = config.get("response_instruction_with_agent_active", "")
-                        if not instruction:
-                            instruction = config.get("response_instruction_with_agent", "")
-                    else:
-                        instruction = config.get("response_instruction_with_multi_agent", "")
-                        # Fallback to regular agent instruction if multi_agent variant not found
-                        if not instruction:
-                            instruction = config.get("response_instruction_with_agent", "")
-                else:
-                    # Standard agent template for situation_builder or single agent scenarios
-                    if GUIDELINE_READ_MODE == "active_tool":
-                        instruction = config.get("response_instruction_with_agent_active", "")
-                        # Fallback to regular instruction if _active variant not found
-                        if not instruction:
-                            instruction = config.get("response_instruction_with_agent", "")
-                    else:
-                        instruction = config.get("response_instruction_with_agent", "")
-                if instruction:
-                    context_lines.append(format_with_particles(instruction, agent_name=agent_name))
-        else:
-            instruction = config.get("response_instruction_default", "")
-            if instruction:
-                context_lines.append(instruction)
+    # Add any remaining text as a final block
+    if current_text.strip():
+        content_blocks.append({"type": "text", "text": current_text.strip()})
 
-    return "\n".join(context_lines)
+    return content_blocks

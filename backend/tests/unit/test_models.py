@@ -26,7 +26,7 @@ class TestRoomModel:
         assert room.id is not None
         assert room.name == "test_room"
         assert room.max_interactions == 10
-        assert room.is_paused == False
+        assert room.is_paused == 0
         assert isinstance(room.created_at, datetime)
 
     @pytest.mark.unit
@@ -38,7 +38,7 @@ class TestRoomModel:
         await test_db.refresh(room)
 
         assert room.max_interactions is None
-        assert room.is_paused == False
+        assert room.is_paused == 0
         assert room.created_at is not None
 
     @pytest.mark.unit
@@ -84,7 +84,7 @@ class TestAgentModel:
         assert agent.id is not None
         assert agent.name == "test_agent"
         assert agent.group == "test_group"
-        assert agent.is_critic == False
+        assert agent.is_critic == 0
         assert isinstance(agent.created_at, datetime)
 
     @pytest.mark.unit

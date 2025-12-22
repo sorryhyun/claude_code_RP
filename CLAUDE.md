@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Code Role Play is a multi-Claude chat room application where multiple Claude AI agents with different personalities can interact in real-time chat rooms.
+ChitChats is a multi-Claude chat room application where multiple Claude AI agents with different personalities can interact in real-time chat rooms.
 
 **Tech Stack:**
 - Backend: FastAPI + SQLAlchemy (async) + PostgreSQL
 - Frontend: React + TypeScript + Vite + Tailwind CSS
 - AI Integration: Anthropic Claude Agent SDK
-- Real-time Communication: HTTP Polling (4-second intervals)
+- Real-time Communication: HTTP Polling (2-second intervals)
 - Background Processing: APScheduler for autonomous agent interactions
 
 ## Development Commands
@@ -27,17 +27,8 @@ cd backend && uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 # Frontend only
 cd frontend && npm run dev
 
-# Run all tests with coverage
+# Run tests
 uv run pytest --cov=backend --cov-report=term-missing
-
-# Run a single test file
-uv run pytest backend/tests/unit/test_crud.py -v
-
-# Run a single test function
-uv run pytest backend/tests/unit/test_crud.py::test_function_name -v
-
-# Lint code (auto-fixes issues)
-uv run ruff check --fix .
 ```
 
 ## Architecture Overview
@@ -45,10 +36,9 @@ uv run ruff check --fix .
 ### Backend
 - **FastAPI** application with REST API and polling endpoints
 - **Multi-agent orchestration** with Claude SDK integration
-- **PostgreSQL** database with async SQLAlchemy and connection pooling
+- **PostgreSQL** database with async SQLAlchemy (asyncpg)
 - **Background scheduler** for autonomous agent conversations
 - **In-memory caching** for performance optimization
-- **Modular configuration** with hot-reloading and startup validation
 - **Domain layer** with Pydantic models for type-safe business logic
 - **Key features:**
   - Agents are independent entities that persist across rooms
@@ -58,7 +48,6 @@ uv run ruff check --fix .
   - Agents continue conversations in background when user is not in room
   - Cached database queries and filesystem reads (70-90% performance improvement)
   - Modular tool architecture (action_tools, guidelines_tools, brain_tools)
-  - Comprehensive config validation with startup diagnostics
 
 **For detailed backend documentation**, see [backend/README.md](backend/README.md) which includes:
 - Complete API reference
@@ -68,6 +57,12 @@ uv run ruff check --fix .
 - Session management
 - Phase 5 refactored SDK integration (AgentManager, ClientPool, StreamParser)
 - Debugging guides
+
+**For Phase 5 refactoring details**, see [plan.md](plan.md) which documents:
+- AgentManager split into focused components (TaskIdentifier, ClientPool, StreamParser)
+- SDK best practices integration
+- 172 lines reduced, improved testability
+- All phases completed (0-4)
 
 **For caching system details**, see [backend/CACHING.md](backend/CACHING.md).
 
@@ -79,7 +74,7 @@ uv run ruff check --fix .
   - AgentManager - Add/remove agents from rooms
   - MessageList - Display messages with thinking text
 - **Real-time features:**
-  - HTTP polling for live message updates (4-second intervals)
+  - HTTP polling for live message updates (2-second intervals)
   - Typing indicators
   - Agent thinking process display
 
@@ -93,10 +88,8 @@ agents/
   agent_name/
     ├── in_a_nutshell.md      # Brief identity summary (third-person)
     ├── characteristics.md     # Personality traits (third-person)
-    ├── recent_events.md      # Auto-updated from conversations
+    ├── recent_events.md      # Auto-updated from ChitChats platform conversations ONLY (not for anime/story backstory)
     ├── consolidated_memory.md # Long-term memories with subtitles (optional)
-    ├── anti_pattern.md       # Behaviors to avoid (optional)
-    ├── memory_brain.md       # Memory-brain configuration (optional)
     └── profile.png           # Optional profile picture (png, jpg, jpeg, gif, webp, svg)
 ```
 
@@ -105,34 +98,6 @@ agents/
 - ❌ Wrong: "You are Dr. Chen..." or "당신은 엘프 마법사로..."
 
 **Profile Pictures:** Add image files (png/jpg/jpeg/gif/webp/svg) to agent folders. Common names: `profile.*`, `avatar.*`, `picture.*`, `photo.*`. Changes apply immediately.
-
-### Memory System Modes
-
-Claude Code Role Play supports **two mutually exclusive memory modes** controlled by the `MEMORY_BY` environment variable:
-
-#### RECALL Mode (`MEMORY_BY=RECALL`)
-- **On-demand memory retrieval** - Agents actively call the `recall` tool to fetch specific memories
-- **Lower baseline token cost** - Only memory subtitles are shown in context, full content loaded on request
-- **Agent-controlled** - Agents decide when and which memories to retrieve
-- **Memory files:** `consolidated_memory.md` (default) or `long_term_memory.md`
-- **Format:** Memories organized with `## [subtitle]` headers
-- **Context injection:** Memory subtitles list shown in `<long_term_memory_index>`
-
-#### BRAIN Mode (`MEMORY_BY=BRAIN`)
-- **Automatic memory surfacing** - Separate memory brain agent analyzes context and injects relevant memories
-- **Higher baseline token cost** - Selected memories pre-loaded before each response
-- **Context-driven** - Psychologically realistic memory activation based on conversation
-- **Memory files:** `long_term_memory.md` with `## [subtitle]` format
-- **Configuration:** Per-agent `memory_brain.md` file with `enabled: true` and policy setting
-- **Policies:** `balanced`, `trauma_biased`, `genius_planner`, `optimistic`, `avoidant`
-- **Features:**
-  - Max 3 memories per turn (configurable)
-  - 10-turn cooldown to prevent repetition
-  - Activation strength scores for each memory
-
-**Global Override:** `MEMORY_BY` setting overrides all per-agent configurations. If `MEMORY_BY=RECALL`, memory brain configs are ignored. If `MEMORY_BY=BRAIN`, only agents with `memory_brain.md` enabled will use memory brain.
-
-**Default:** If `MEMORY_BY` is not set or has an invalid value, defaults to `RECALL` mode.
 
 ### Filesystem-Primary Architecture
 
@@ -144,26 +109,79 @@ Claude Code Role Play supports **two mutually exclusive memory modes** controlle
 - File locking prevents concurrent write conflicts
 - See `backend/utils/file_locking.py` for implementation
 
-**Modular Config System (`backend/config/`):**
-```
-config/
-├── config_loader.py    # Facade - backward-compatible imports
-├── cache.py            # YAML caching with mtime invalidation
-├── loaders.py          # File loaders (get_tools_config, etc.)
-├── tools.py            # Tool descriptions and schemas
-├── memory.py           # Memory brain configuration
-└── validation.py       # Schema validation, startup logging
-```
-
 ### Tool Configuration (YAML-Based)
 
 Tool descriptions and debug settings are configured via YAML files in `backend/config/tools/`:
 
 **`tools.yaml`** - Tool definitions and descriptions
-- Defines available tools (skip, memorize, recall, guidelines, configuration)
+- Defines available tools (skip, memorize, guidelines, configuration)
 - Tool descriptions support template variables (`{agent_name}`, `{config_sections}`)
 - Enable/disable tools individually
 - Changes apply immediately (no restart required)
+
+### Group-Specific Tool Overrides
+
+You can override tool configurations for all agents in a group using `group_config.yaml`:
+
+**Structure:**
+```
+agents/
+  group_슈타게/
+    ├── group_config.yaml  # Group-wide tool overrides
+    └── 크리스/
+        ├── in_a_nutshell.md
+        └── ...
+```
+
+**Example `group_config.yaml`:**
+```yaml
+# Override tool responses/descriptions for all agents in this group
+tools:
+  recall:
+    # Return memories verbatim without AI rephrasing
+    response: "{memory_content}"
+
+  skip:
+    # Custom skip message for this group
+    response: "This character chooses to remain silent."
+```
+
+**Features:**
+- **Follows `tools.yaml` structure** - Any field from `tools.yaml` can be overridden (response, description, etc.)
+- **Group-wide application** - Applies to all agents in `group_*` folder
+- **Hot-reloaded** - Changes apply immediately on next agent response
+- **Selective overrides** - Only override what you need, inherit the rest from global config
+
+**Use Cases:**
+- **No rephrasing for technical content** - Scientific/technical characters (e.g., Steins;Gate group) recall memories exactly as written
+- **Group-specific response styles** - Different personality groups can have customized tool responses
+- **Context-specific behaviors** - Anime groups can have culturally appropriate tool messages
+
+See `agents/group_config.yaml.example` for more examples.
+
+### Group Behavior Settings
+
+In addition to tool overrides, `group_config.yaml` supports behavior settings that affect how agents interact:
+
+```yaml
+# group_config.yaml
+interrupt_every_turn: true  # Agent responds after every message
+priority: 5                 # Higher priority = responds before others
+transparent: true           # Agent's responses don't trigger others to reply
+```
+
+**Available Settings:**
+- **`interrupt_every_turn`** - When `true`, agents in this group always get a turn after any message
+- **`priority`** - Integer value (default: 0). Higher values mean agent responds before lower priority agents
+- **`transparent`** - When `true`, other agents won't be triggered to respond after this agent speaks. Useful for Narrator-type agents whose commentary shouldn't prompt replies. Messages are still visible to all agents.
+
+**Example: Narrator Agent Group**
+```yaml
+# agents/group_tool/group_config.yaml
+interrupt_every_turn: true  # Narrator always comments after each message
+priority: 5                 # Narrator responds first
+transparent: true           # Other agents don't reply to narrator
+```
 
 **`guidelines_3rd.yaml`** - Role guidelines for agent behavior
 - Defines system prompt template and behavioral guidelines
@@ -171,11 +189,6 @@ Tool descriptions and debug settings are configured via YAML files in `backend/c
 - Currently uses `v3` (enhanced guidelines with explicit scene handling)
 - Guidelines are injected via tool descriptions
 - Supports situation builder notes
-
-**`brain_config.yaml`** - Memory brain configuration
-- Memory policies (`balanced`, `trauma_biased`, `genius_planner`, `optimistic`, `avoidant`)
-- Memory selection tool definitions
-- Default settings (max_memories, cooldown)
 
 **`debug.yaml`** - Debug logging configuration
 - Control what gets logged (system prompt, tools, messages, responses)
@@ -185,7 +198,9 @@ Tool descriptions and debug settings are configured via YAML files in `backend/c
 
 ### Third-Person Perspective System
 
-Claude Code Role Play uses a **third-person perspective** approach for agent configurations, which separates character description from AI instructions:
+ChitChats uses a **third-person perspective** approach for agent configurations, which separates character description from AI instructions.
+
+**Why third-person?** When running through Claude Agent SDK (via Claude Code), agents inherit an immutable system prompt ("You are Claude Code...") from the parent environment. Third-person character descriptions avoid conflicting "You are..." statements, allowing our system prompt to layer character identity on top of the inherited prompt. See [how_it_works.md](how_it_works.md#why-third-person-perspective) for technical details.
 
 **How it works:**
 1. **Agent configuration files** describe the character in third-person:
@@ -193,7 +208,7 @@ Claude Code Role Play uses a **third-person perspective** approach for agent con
    - Korean: "프리렌은 1000년 이상 살아온 엘프 마법사로..."
 
 2. **System prompt** (in `guidelines_3rd.yaml`) uses `{agent_name}` placeholders:
-   - "You are {agent_name}. Embody {agent_name}'s complete personality..."
+   - "In here, you are fully embodying the character {agent_name}..."
    - "Think only 'what would {agent_name} do?', not 'what is morally correct?'"
 
 3. **At runtime**, the agent name is substituted into the template, creating instructions like:
@@ -225,7 +240,20 @@ debug:
    make install
    ```
 
-2. **Configure authentication:**
+2. **Setup PostgreSQL:**
+   ```bash
+   # Install PostgreSQL (if not already installed)
+   # macOS: brew install postgresql@15
+   # Ubuntu: sudo apt install postgresql
+
+   # Create database
+   createdb chitchats
+
+   # Or with custom credentials:
+   # psql -c "CREATE DATABASE chitchats;"
+   ```
+
+3. **Configure authentication:**
    ```bash
    # Generate password hash
    make generate-hash
@@ -240,18 +268,6 @@ debug:
    ```
 
    See [SETUP.md](SETUP.md) for detailed instructions.
-
-3. **Set up PostgreSQL database:**
-   ```bash
-   # Create database (example using psql)
-   createdb chitchats
-
-   # Configure DATABASE_URL in .env
-   # DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/chitchats
-
-   # If migrating from SQLite, run migration script
-   python scripts/migrate_sqlite_to_postgres.py
-   ```
 
 4. **Run development servers:**
    ```bash
@@ -270,23 +286,20 @@ debug:
 ### Backend Environment Variables (`.env`)
 
 **Required:**
-- `DATABASE_URL` - PostgreSQL connection URL (format: `postgresql+asyncpg://user:pass@host:port/dbname`)
-- `API_KEY_HASH` - Bcrypt hash of your password (generate with `python generate_hash.py`)
+- `DATABASE_URL` - PostgreSQL connection string (default: `postgresql+asyncpg://postgres:postgres@localhost:5432/chitchats`)
+- `API_KEY_HASH` - Bcrypt hash of your password (generate with `make generate-hash`)
 - `JWT_SECRET` - Secret key for signing JWT tokens (generate with `python -c "import secrets; print(secrets.token_hex(32))"`)
-
-**Optional (Database):**
-- `DB_POOL_SIZE` - Connection pool size (default: 5)
-- `DB_MAX_OVERFLOW` - Maximum overflow connections (default: 10)
-- `DB_POOL_TIMEOUT` - Pool connection timeout in seconds (default: 30)
-- `DB_POOL_RECYCLE` - Connection recycle time in seconds (default: 1800)
 
 **Optional:**
 - `USER_NAME` - Display name for user messages in chat (default: "User")
 - `DEBUG_AGENTS` - Set to "true" for verbose agent logging
 - `MEMORY_BY` - Memory system mode: `RECALL` (on-demand retrieval, default) or `BRAIN` (automatic surfacing)
 - `RECALL_MEMORY_FILE` - Memory file for recall mode: `consolidated_memory` (default) or `long_term_memory`
-- `MAX_THINKING_TOKENS` - Maximum thinking tokens for agent responses (default: "32768")
-- `MEMORY_BRAIN_MAX_THINKING_TOKENS` - Maximum thinking tokens for memory brain (default: "2048")
+- `READ_GUIDELINE_BY` - Guideline delivery mode: `active_tool` (default) or `description`
+- `USE_HAIKU` - Set to "true" to use Haiku model instead of Opus (default: false)
+- `PRIORITY_AGENTS` - Comma-separated agent names for priority responding
+- `MAX_CONCURRENT_ROOMS` - Max rooms for background scheduler (default: 5)
+- `ENABLE_GUEST_LOGIN` - Enable/disable guest login (default: true)
 - `FRONTEND_URL` - CORS allowed origin for production (e.g., `https://your-app.vercel.app`)
 - `VERCEL_URL` - Auto-detected on Vercel deployments
 
@@ -298,12 +311,12 @@ debug:
 - Authentication is handled by the Claude Agent SDK when running through Claude Code with an active subscription
 - No ANTHROPIC_API_KEY configuration is needed for the SDK
 
-### Database
-- **Type:** PostgreSQL with async SQLAlchemy (asyncpg driver)
-- **Configuration:** Set `DATABASE_URL` in `.env` (format: `postgresql+asyncpg://user:pass@host:port/dbname`)
-- **Connection Pooling:** Configurable via `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`, `DB_POOL_RECYCLE`
-- **Migrations:** Automatic schema updates via `backend/utils/migrations.py` (no manual deletion needed)
-- **Data Migration:** Run `python scripts/migrate_sqlite_to_postgres.py` to migrate existing SQLite data
+### Database (PostgreSQL)
+- **Connection:** Configure via `DATABASE_URL` environment variable
+- **Format:** `postgresql+asyncpg://user:password@host:port/database`
+- **Default:** `postgresql+asyncpg://postgres:postgres@localhost:5432/chitchats`
+- **Migrations:** Automatic schema updates via `backend/infrastructure/database/migrations.py`
+- **Setup:** Create database with `createdb chitchats` before first run
 
 ### CORS Configuration
 - CORS is configured in `main.py` using environment variables
@@ -321,25 +334,17 @@ debug:
 
 **Update tool descriptions:** Edit YAML files in `backend/config/tools/` (changes apply immediately)
 
-**Update guidelines:** Edit `v3.template` section in `backend/config/tools/guidelines_3rd.yaml` (changes apply immediately)
+**Update guidelines:** Edit `v1/v2/v3.template` section in `backend/config/tools/guidelines_3rd.yaml` (changes apply immediately)
 
 **Enable debug logging:** Set `DEBUG_AGENTS=true` in `.env` or edit `backend/config/tools/debug.yaml`
 
-**Switch to RECALL mode:** Set `MEMORY_BY=RECALL` in `.env`, restart backend (agents will use on-demand recall tool)
-
-**Switch to BRAIN mode:** Set `MEMORY_BY=BRAIN` in `.env`, ensure agents have `memory_brain.md` with `enabled: true`, restart backend
-
 **Add database field:** Update `models.py`, add migration in `backend/utils/migrations.py`, update `schemas.py` and `crud.py`, restart
 
-**Add endpoint:** Define schema in `schemas.py`, add CRUD in `crud/`, add router endpoint in `routers/`
-
-**Run single test:** `uv run pytest backend/tests/unit/test_file.py::test_name -v`
-
-**Build Windows executable:** `uv run poe build-exe` (requires frontend build first)
+**Add endpoint:** Define schema in `schemas.py`, add CRUD in `crud.py`, add endpoint in `main.py`
 
 ## Automated Simulations
 
-Claude Code Role Play includes bash scripts for running automated multi-agent chatroom simulations via curl API calls. This is useful for testing agent behaviors, creating conversation datasets, or running batch simulations.
+ChitChats includes bash scripts for running automated multi-agent chatroom simulations via curl API calls. This is useful for testing agent behaviors, creating conversation datasets, or running batch simulations.
 
 **Quick Example:**
 ```bash

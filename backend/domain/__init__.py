@@ -21,6 +21,7 @@ from .contexts import (
     MessageContext,
     OrchestrationContext,
 )
+from .enums import ParticipantType
 
 __all__ = [
     "AgentConfigData",
@@ -28,6 +29,7 @@ __all__ = [
     "OrchestrationContext",
     "MessageContext",
     "AgentMessageData",
+    "ParticipantType",
     "SkipInput",
     "SkipOutput",
     "MemorizeInput",

@@ -8,7 +8,7 @@ that write operations properly invalidate related cache entries.
 import logging
 from typing import Any, Callable, Dict, Optional, TypeVar
 
-from utils.cache import (
+from infrastructure.cache import (
     CacheManager,
     agent_config_key,
     agent_object_key,

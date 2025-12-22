@@ -1,0 +1,21 @@
+{
+  "loading": "Loading...",
+  "cancel": "Cancel",
+  "save": "Save",
+  "delete": "Delete",
+  "confirm": "Confirm",
+  "close": "Close",
+  "search": "Search",
+  "clear": "Clear",
+  "update": "Update",
+  "success": "Success",
+  "error": "Error",
+  "logout": "Logout",
+  "logoutConfirm": "Are you sure you want to logout?",
+  "appName": "ChitChats",
+  "appSubtitle": "Claude Code RP Platform",
+  "failedToCreate": "Failed to create {{item}}",
+  "failedToUpdate": "Failed to update {{item}}",
+  "failedToDelete": "Failed to delete {{item}}",
+  "failedToLoad": "Failed to load {{item}}"
+}

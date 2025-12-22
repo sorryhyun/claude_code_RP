@@ -1,16 +1,7 @@
-import { useState, useMemo } from 'react';
-import { ChevronDown, Info, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import type { Agent } from '../../types';
 import { AgentAvatar } from '../AgentAvatar';
 import { useAuth } from '../../contexts/AuthContext';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 
 interface AgentListPanelProps {
   agents: Agent[];
@@ -30,25 +21,23 @@ export const AgentListPanel = ({
   const { isAdmin } = useAuth();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
-  const groupedAgents = useMemo(() => {
-    const groups = new Map<string, Agent[]>();
+  // Group agents by their group field
+  const groups = new Map<string, Agent[]>();
 
-    agents.forEach((agent) => {
-      const groupName = agent.group || 'Ungrouped';
-      if (!groups.has(groupName)) {
-        groups.set(groupName, []);
-      }
-      groups.get(groupName)!.push(agent);
-    });
+  agents.forEach((agent) => {
+    const groupName = agent.group || 'Ungrouped';
+    if (!groups.has(groupName)) {
+      groups.set(groupName, []);
+    }
+    groups.get(groupName)!.push(agent);
+  });
 
-    const sortedGroups = Array.from(groups.entries()).sort(([a], [b]) => {
-      if (a === 'Ungrouped') return 1;
-      if (b === 'Ungrouped') return -1;
-      return a.localeCompare(b, 'ko-KR', { sensitivity: 'base' });
-    });
-
-    return sortedGroups;
-  }, [agents]);
+  // Sort groups: Ungrouped last, others alphabetically (Korean-aware)
+  const groupedAgents = Array.from(groups.entries()).sort(([a], [b]) => {
+    if (a === 'Ungrouped') return 1;
+    if (b === 'Ungrouped') return -1;
+    return a.localeCompare(b, 'ko-KR', { sensitivity: 'base' });
+  });
 
   const toggleGroup = (groupName: string) => {
     setCollapsedGroups((prev) => {
@@ -65,103 +54,120 @@ export const AgentListPanel = ({
   const renderAgent = (agent: Agent) => (
     <div
       key={agent.id}
-      className={cn(
-        'group relative flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer transition-colors',
+      className={`group relative flex items-center gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-lg cursor-pointer transition-all min-h-[52px] touch-manipulation ${
         selectedAgentId === agent.id
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-          : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-      )}
+          ? 'bg-slate-100 border border-slate-300'
+          : 'hover:bg-slate-50 active:bg-slate-100'
+      }`}
     >
       <div
         onClick={() => onSelectAgent(agent.id)}
-        className="flex items-center gap-2.5 flex-1 min-w-0"
+        className="flex items-center gap-2.5 sm:gap-3 flex-1 min-w-0"
       >
         <AgentAvatar
           agent={agent}
-          size="sm"
-          className={cn(
-            'w-8 h-8',
-            selectedAgentId === agent.id && 'ring-2 ring-accent'
-          )}
+          size="md"
+          className={`w-10 h-10 sm:w-11 sm:h-11 ${
+            selectedAgentId === agent.id
+              ? 'ring-2 ring-slate-400'
+              : 'group-hover:ring-2 group-hover:ring-slate-300'
+          }`}
         />
-        <span className={cn(
-          'font-medium truncate text-sm',
-          selectedAgentId === agent.id && 'text-sidebar-foreground'
-        )}>
+        <span
+          className={`font-medium truncate text-sm sm:text-base ${
+            selectedAgentId === agent.id ? 'text-slate-800' : 'text-slate-700'
+          }`}
+        >
           {agent.name}
         </span>
       </div>
-
-      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button
+      <div className="flex gap-1 opacity-0 sm:group-hover:opacity-100 group-active:opacity-100 transition-opacity">
+        <button
           onClick={(e) => {
             e.stopPropagation();
             onViewProfile(agent);
           }}
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-primary"
+          className="p-2 hover:bg-slate-200 active:bg-slate-300 rounded text-slate-500 hover:text-slate-700 min-w-[40px] min-h-[40px] flex items-center justify-center touch-manipulation"
+          title="View profile"
         >
-          <Info className="w-3.5 h-3.5" />
-        </Button>
+          <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+        </button>
         {isAdmin && (
-          <Button
+          <button
             onClick={(e) => {
               e.stopPropagation();
               if (confirm(`Delete agent "${agent.name}"?`)) {
                 onDeleteAgent(agent.id);
               }
             }}
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            className="p-2 hover:bg-red-100 active:bg-red-200 rounded text-red-500 hover:text-red-700 min-w-[40px] min-h-[40px] flex items-center justify-center touch-manipulation"
+            title="Delete agent"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
+            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
         )}
       </div>
     </div>
   );
 
   return (
-    <div className="p-2 space-y-2">
+    <div className="absolute inset-0 overflow-y-auto p-2 sm:p-3 space-y-3">
       {agents.length === 0 ? (
-        <div className="text-center text-muted-foreground mt-8 px-4">
-          <p className="text-sm">No agents yet</p>
+        <div className="text-center text-slate-500 mt-8 px-4">
+          <p className="text-xs sm:text-sm">No agents yet</p>
           <p className="text-xs mt-1">Create one to get started!</p>
         </div>
       ) : (
         groupedAgents.map(([groupName, groupAgents]) => {
           const isCollapsed = collapsedGroups.has(groupName);
           return (
-            <Collapsible
-              key={groupName}
-              open={!isCollapsed}
-              onOpenChange={() => toggleGroup(groupName)}
-            >
-              <CollapsibleTrigger asChild>
-                <button className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-sidebar-accent/50 rounded transition-colors group/header">
-                  <div className="flex items-center gap-2">
-                    <ChevronDown
-                      className={cn(
-                        'w-4 h-4 text-muted-foreground transition-transform',
-                        isCollapsed && '-rotate-90'
-                      )}
-                    />
-                    <span className="font-semibold text-xs uppercase tracking-wide text-muted-foreground">
-                      {groupName}
-                    </span>
-                  </div>
-                  <Badge variant="secondary" className="text-xs px-1.5 py-0 h-5">
+            <div key={groupName} className="space-y-1">
+              {/* Group Header */}
+              <button
+                onClick={() => toggleGroup(groupName)}
+                className="w-full flex items-center justify-between px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg transition-colors group/header"
+              >
+                <div className="flex items-center gap-2">
+                  <svg
+                    className={`w-4 h-4 text-slate-600 transition-transform ${
+                      isCollapsed ? '-rotate-90' : ''
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                  <span className="font-semibold text-sm text-slate-700">
+                    {groupName}
+                  </span>
+                  <span className="text-xs text-slate-600 bg-slate-200 px-2 py-0.5 rounded-full">
                     {groupAgents.length}
-                  </Badge>
-                </button>
-              </CollapsibleTrigger>
+                  </span>
+                </div>
+              </button>
 
-              <CollapsibleContent className="space-y-0.5 mt-1">
-                {groupAgents.map(renderAgent)}
-              </CollapsibleContent>
-            </Collapsible>
+              {/* Group Agents */}
+              {!isCollapsed && (
+                <div className="space-y-1 pl-2">
+                  {groupAgents.map(renderAgent)}
+                </div>
+              )}
+            </div>
           );
         })
       )}

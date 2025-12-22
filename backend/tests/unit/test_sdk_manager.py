@@ -14,6 +14,7 @@ from domain.contexts import AgentResponseContext
 from domain.task_identifier import TaskIdentifier
 from sdk.client_pool import ClientPool
 from sdk.manager import AgentManager
+from sdk.options_builder import build_agent_options
 
 
 class TestAgentManagerInit:
@@ -125,46 +126,43 @@ class TestInterruptRoom:
 
 
 class TestBuildAgentOptions:
-    """Tests for _build_agent_options method."""
+    """Tests for build_agent_options function."""
 
     def test_build_agent_options_basic(self):
         """Test building basic agent options."""
-        manager = AgentManager()
-
         config = AgentConfigData(in_a_nutshell="Test agent", characteristics="Friendly", recent_events="Recent event")
 
         context = Mock(agent_name="TestAgent", config=config, session_id=None, has_situation_builder=False)
 
         with (
-            patch("sdk.manager.create_guidelines_mcp_server") as mock_guidelines_mcp,
-            patch("sdk.manager.create_action_mcp_server") as mock_action_mcp,
+            patch("sdk.options_builder.create_guidelines_mcp_server") as mock_guidelines_mcp,
+            patch("sdk.options_builder.create_action_mcp_server") as mock_action_mcp,
         ):
             mock_guidelines_mcp.return_value = Mock()
             mock_action_mcp.return_value = Mock()
 
-            options = manager._build_agent_options(context, "System prompt")
+            options = build_agent_options(context, "System prompt")
 
             # Verify options were created correctly
             assert options.system_prompt == "System prompt"
-            assert "claude-sonnet" in options.model or "claude-haiku" in options.model
-            # Check that max_thinking_tokens is set from environment variable
-            from config.constants import MAX_THINKING_TOKENS
-
-            assert options.max_thinking_tokens == MAX_THINKING_TOKENS
+            # Model is hardcoded to opus in options_builder.py
+            assert "claude-opus" in options.model
+            assert options.max_thinking_tokens == 32768
             assert "guidelines" in options.mcp_servers
             assert "action" in options.mcp_servers
 
     def test_build_agent_options_with_session(self):
         """Test building options with session ID."""
-        manager = AgentManager()
-
         config = AgentConfigData(in_a_nutshell="Test")
         context = Mock(
             agent_name="TestAgent", config=config, session_id="test_session_123", has_situation_builder=False
         )
 
-        with patch("sdk.manager.create_guidelines_mcp_server"), patch("sdk.manager.create_action_mcp_server"):
-            options = manager._build_agent_options(context, "System prompt")
+        with (
+            patch("sdk.options_builder.create_guidelines_mcp_server"),
+            patch("sdk.options_builder.create_action_mcp_server"),
+        ):
+            options = build_agent_options(context, "System prompt")
 
             # Should include resume session
             assert options.resume == "test_session_123"

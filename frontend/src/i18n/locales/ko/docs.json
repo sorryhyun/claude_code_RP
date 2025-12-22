@@ -1,0 +1,98 @@
+{
+  "title": "ChitChats 사용 방법",
+  "subtitle": "에이전트 및 앱 사용에 대한 완전한 가이드",
+  "gotIt": "확인!",
+  "tabs": {
+    "gettingStarted": "시작하기",
+    "agentConfig": "에이전트 설정",
+    "appUsage": "앱 사용법"
+  },
+  "gettingStarted": {
+    "whatIsTitle": "ChitChats란?",
+    "whatIsDesc": "ChitChats는 다양한 성격을 가진 여러 AI 에이전트가 실시간 채팅방에서 상호작용할 수 있는 멀티 Claude 채팅방 애플리케이션입니다. 각 에이전트는 Claude로 구동되며 고유한 특성, 배경 및 행동을 설정할 수 있습니다.",
+    "quickStartTitle": "빠른 시작",
+    "createRoom": "채팅방 탭에서 + 버튼을 클릭하여 새 대화 공간을 만드세요",
+    "addAgents": "채팅방의 에이전트 관리자를 사용하여 AI 참가자를 추가하세요",
+    "startChatting": "메시지를 보내고 에이전트가 성격에 맞게 응답하는 것을 확인하세요",
+    "manageAgents": "에이전트 탭에서 에이전트를 클릭하여 프로필을 보거나 수정하세요",
+    "keyConcepts": "주요 개념",
+    "conceptAgents": "마크다운 파일로 설정된 고유한 성격을 가진 AI 캐릭터",
+    "conceptRooms": "사용자와 에이전트가 대화할 수 있는 채팅 공간",
+    "conceptThirdPerson": "에이전트 설정은 3인칭 관점을 사용합니다 (예: \"앨리스는...\" (O), \"당신은...\" (X))",
+    "conceptHotReload": "에이전트 파일을 직접 수정하면 변경 사항이 즉시 적용됩니다"
+  },
+  "agentConfig": {
+    "folderStructure": "에이전트 폴더 구조",
+    "folderDesc": "각 에이전트는 폴더 내 마크다운 파일로 설정됩니다:",
+    "requiredFiles": "필수 파일",
+    "inANutshellDesc": "에이전트 정체성의 간단한 요약. 예: \"Dr. Sarah Chen은 ML 전문 데이터 과학자입니다.\"",
+    "characteristicsDesc": "상세한 성격 특성, 의사소통 스타일, 특이점 및 행동 패턴.",
+    "thirdPersonTitle": "3인칭 관점",
+    "thirdPersonDesc": "에이전트 파일은 반드시 3인칭 관점을 사용해야 합니다. 이것은 적절한 롤플레이에 매우 중요합니다.",
+    "correct": "올바름",
+    "correctExample": "\"프리렌은 1000년 이상 살아온 엘프 마법사로...\"",
+    "wrong": "잘못됨",
+    "wrongExample": "\"당신은 프리렌이며, 엘프 마법사입니다...\"",
+    "profilePictures": "프로필 사진",
+    "profilePicturesDesc": "에이전트 폴더에 이미지 파일을 추가하세요. 지원 형식:",
+    "commonFileNames": "일반적인 파일 이름:",
+    "groupConfig": "그룹 설정",
+    "groupConfigDesc": "group_* 폴더를 사용하여 에이전트를 그룹화하고 설정을 공유할 수 있습니다:",
+    "creatingAgent": "에이전트 생성하기",
+    "step1": "agents/ 폴더에 에이전트 이름으로 폴더를 만드세요",
+    "step2": "간단한 3인칭 설명이 담긴 in_a_nutshell.md를 추가하세요",
+    "step3": "성격 세부사항이 담긴 characteristics.md를 추가하세요",
+    "step4": "선택적으로 프로필 사진을 추가하세요",
+    "step5": "에이전트가 에이전트 탭에 자동으로 나타납니다"
+  },
+  "appUsage": {
+    "creatingRooms": "방 만들기",
+    "creatingRoomsSteps": {
+      "click": "사이드바에서 + 새 채팅방 버튼을 클릭하세요",
+      "enter": "방 이름을 입력하세요 (예: \"커피숍 토론\")",
+      "created": "방이 생성되고 자동으로 선택됩니다",
+      "rename": "채팅에서 방 헤더를 클릭하여 방 이름을 변경할 수 있습니다"
+    },
+    "addingAgents": "방에 에이전트 추가하기",
+    "addingAgentsSteps": {
+      "open": "채팅방을 열고 에이전트 관리 버튼(그룹 아이콘)을 클릭하세요",
+      "browse": "사용 가능한 에이전트를 둘러보고 클릭하여 방에 추가하세요",
+      "added": "추가된 에이전트가 방의 참가자 목록에 나타납니다",
+      "remove": "관리자에서 에이전트 이름 옆의 X를 클릭하여 제거하세요"
+    },
+    "chatting": "에이전트와 채팅하기",
+    "chattingSteps": {
+      "type": "하단 입력 필드에 메시지를 입력하세요",
+      "send": "Enter를 누르거나 보내기를 클릭하여 메시지를 전송하세요",
+      "respond": "에이전트가 성격과 대화 맥락에 따라 응답합니다",
+      "thinking": "에이전트가 응답을 구성하는 동안 \"생각\" 과정을 볼 수 있습니다",
+      "multiple": "관련성에 따라 여러 에이전트가 하나의 메시지에 응답할 수 있습니다"
+    },
+    "specialMessages": "특수 메시지 유형",
+    "specialMessagesDesc": "접두사를 사용하여 다른 유형의 메시지를 보내세요:",
+    "scenePrefix": "[scene] 또는 [상황] - 장면을 설정하거나 환경을 설명",
+    "oocPrefix": "[ooc] 또는 [괄호] - 에이전트에게 아웃 오브 캐릭터 지시",
+    "regularMessages": "일반 메시지는 인캐릭터 대화로 처리됩니다",
+    "managingProfiles": "에이전트 프로필 관리",
+    "managingProfilesSteps": {
+      "goTo": "사이드바에서 에이전트 탭으로 이동하세요",
+      "click": "에이전트를 클릭하여 전체 프로필을 확인하세요",
+      "edit": "모달에서 에이전트 특성을 직접 수정하세요",
+      "upload": "프로필 사진을 업로드하거나 변경하세요",
+      "saved": "변경 사항이 즉시 파일 시스템에 저장됩니다"
+    },
+    "searchNav": "검색 및 탐색",
+    "searchNavSteps": {
+      "search": "에이전트 탭의 검색창을 사용하여 이름으로 에이전트를 찾으세요",
+      "korean": "한글 초성 검색을 지원합니다",
+      "hamburger": "햄버거 메뉴를 클릭하여 사이드바를 표시/숨기세요",
+      "mobile": "모바일에서는 사이드바가 서랍 형태로 열립니다"
+    },
+    "keyboardShortcuts": "키보드 단축키",
+    "shortcuts": {
+      "escape": "Escape - 모달 및 사이드바 닫기",
+      "enter": "Enter - 메시지 보내기",
+      "shiftEnter": "Shift + Enter - 메시지에서 줄 바꿈"
+    }
+  }
+}

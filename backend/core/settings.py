@@ -5,22 +5,68 @@ This module provides type-safe access to environment variables with validation.
 All settings are loaded once at application startup.
 """
 
-import tempfile
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
-from core.paths import get_work_dir
+# ============================================================================
+# Application Constants
+# ============================================================================
 
+# Default fallback prompt if no configuration is provided
+DEFAULT_FALLBACK_PROMPT = "You are a helpful AI assistant."
 
-def _get_default_agent_cwd() -> str:
-    """Get a platform-appropriate default directory for Claude Agent SDK."""
-    # Use system temp directory (works on both Windows and Unix)
-    temp_dir = Path(tempfile.gettempdir()) / "claude-agent-sandbox"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    return str(temp_dir)
+# Skip message text (displayed when agent chooses not to respond)
+SKIP_MESSAGE_TEXT = "(무시함)"
+
+# Claude Agent SDK Tool Configuration
+# These are the built-in tools provided by Claude Agent SDK that we want to disallow
+# to ensure agents stay in character and use only their character-specific tools
+# BUILTIN_TOOLS = [
+#     "Task",
+#     "Bash",
+#     "Glob",
+#     "Grep",
+#     "ExitPlanMode",
+#     "Read",
+#     "Edit",
+#     "Write",
+#     "NotebookEdit",
+#     "WebFetch",
+#     "TodoWrite",
+#     "WebSearch",
+#     "BashOutput",
+#     "KillShell",
+#     "Skill",
+#     "SlashCommand",
+#     "ListMcpResources",
+# ]
+
+# Character-specific MCP tool names organized by group
+# These are the tools available to each agent for character-based interactions
+AGENT_TOOL_NAMES_BY_GROUP: Dict[str, Dict[str, str]] = {
+    "action": {
+        "skip": "mcp__action__skip",
+        "memorize": "mcp__action__memorize",
+        "recall": "mcp__action__recall",
+    },
+    "character": {
+        "memory_select": "mcp__character__character_identity",
+    },
+    "guidelines": {
+        "read": "mcp__guidelines__read",
+        "anthropic": "mcp__guidelines__anthropic",
+    },
+}
+
+# Backward compatibility: Flat dictionary for legacy code
+AGENT_TOOL_NAMES = {
+    tool_key: tool_name
+    for group_tools in AGENT_TOOL_NAMES_BY_GROUP.values()
+    for tool_key, tool_name in group_tools.items()
+}
 
 
 class Settings(BaseSettings):
@@ -29,13 +75,6 @@ class Settings(BaseSettings):
 
     All settings have sensible defaults and are validated on startup.
     """
-
-    # Database configuration (required)
-    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/chitchats"
-    db_pool_size: int = 5
-    db_max_overflow: int = 10
-    db_pool_timeout: float = 30.0
-    db_pool_recycle: int = 1800
 
     # Authentication
     api_key_hash: Optional[str] = None
@@ -54,11 +93,11 @@ class Settings(BaseSettings):
     vercel_url: Optional[str] = None
 
     # Memory system
-    memory_by: Literal["RECALL", "BRAIN"] = "RECALL"
     recall_memory_file: str = "consolidated_memory"
 
     # Guidelines system
     read_guideline_by: Literal["description", "active_tool"] = "active_tool"
+    guidelines_file: str = "guidelines_3rd"
 
     # Model configuration
     use_haiku: bool = False
@@ -66,33 +105,12 @@ class Settings(BaseSettings):
     # Debug configuration
     debug_agents: bool = False
 
-    # Agent SDK configuration
-    agent_cwd: str = ""  # Will be set to platform-appropriate default via validator
-    agent_pool_max_size: int = 50  # Maximum number of concurrent SDK clients
-    agent_pool_lock_timeout: float = 30.0  # Seconds to wait for connection lock
-    agent_query_timeout: float = 10.0  # Seconds to wait for agent query to complete
-
     # Background scheduler configuration
     max_concurrent_rooms: int = 5
 
     # Deprecated settings (kept for backwards compatibility warnings)
     enable_recall_tool: Optional[str] = None
     enable_memory_tool: Optional[str] = None
-
-    @field_validator("memory_by", mode="before")
-    @classmethod
-    def validate_memory_by(cls, v: Optional[str]) -> str:
-        """Validate and normalize MEMORY_BY setting."""
-        if not v:
-            return "RECALL"
-        v_upper = v.upper()
-        if v_upper in ("RECALL", "BRAIN"):
-            return v_upper
-        # Invalid value - log warning and default to RECALL
-        import logging
-
-        logging.warning(f"Invalid MEMORY_BY value: {v}. Defaulting to RECALL mode.")
-        return "RECALL"
 
     @field_validator("read_guideline_by", mode="before")
     @classmethod
@@ -139,18 +157,6 @@ class Settings(BaseSettings):
             return v.lower() == "true"
         return False
 
-    @field_validator("agent_cwd", mode="before")
-    @classmethod
-    def validate_agent_cwd(cls, v: Optional[str]) -> str:
-        """Ensure agent_cwd is a valid, platform-appropriate directory."""
-        if v and v.strip():
-            # User provided a custom path - ensure it exists
-            path = Path(v)
-            path.mkdir(parents=True, exist_ok=True)
-            return str(path)
-        # Use platform-appropriate default
-        return _get_default_agent_cwd()
-
     def get_priority_agent_names(self) -> List[str]:
         """
         Get the list of priority agent names from the PRIORITY_AGENTS setting.
@@ -162,6 +168,87 @@ class Settings(BaseSettings):
             return []
         # Split by comma and strip whitespace from each name
         return [name.strip() for name in self.priority_agents.split(",") if name.strip()]
+
+    @property
+    def project_root(self) -> Path:
+        """
+        Get the project root directory (parent of backend/).
+
+        Returns:
+            Path to the project root directory
+        """
+        backend_dir = Path(__file__).parent.parent
+        return backend_dir.parent
+
+    @property
+    def backend_dir(self) -> Path:
+        """
+        Get the backend directory.
+
+        Returns:
+            Path to the backend directory
+        """
+        return Path(__file__).parent.parent
+
+    @property
+    def agents_dir(self) -> Path:
+        """
+        Get the agents configuration directory.
+
+        Returns:
+            Path to the agents directory
+        """
+        return self.project_root / "agents"
+
+    @property
+    def config_dir(self) -> Path:
+        """
+        Get the configuration files directory.
+
+        Returns:
+            Path to backend/config directory
+        """
+        return self.backend_dir / "config"
+
+    @property
+    def tools_config_path(self) -> Path:
+        """
+        Get the path to tools.yaml configuration file.
+
+        Returns:
+            Path to tools.yaml
+        """
+        return self.config_dir / "tools.yaml"
+
+    @property
+    def debug_config_path(self) -> Path:
+        """
+        Get the path to debug.yaml configuration file.
+
+        Returns:
+            Path to debug.yaml
+        """
+        return self.config_dir / "debug.yaml"
+
+    @property
+    def conversation_context_config_path(self) -> Path:
+        """
+        Get the path to conversation_context.yaml configuration file.
+
+        Returns:
+            Path to conversation_context.yaml
+        """
+        return self.config_dir / "conversation_context.yaml"
+
+    @property
+    def guidelines_config_path(self) -> Path:
+        """
+        Get the path to the guidelines configuration file.
+
+        Returns:
+            Path to the guidelines YAML file (e.g., guidelines_3rd.yaml)
+        """
+        return self.config_dir / f"{self.guidelines_file}.yaml"
 
     def get_cors_origins(self) -> List[str]:
         """
@@ -227,34 +314,29 @@ class Settings(BaseSettings):
 
 # Singleton instance - load settings once at module import
 _settings: Optional[Settings] = None
-_settings_lock = __import__("threading").Lock()
 
 
 def get_settings() -> Settings:
     """
     Get the application settings singleton.
 
-    Thread-safe implementation using double-checked locking pattern.
-
     Returns:
         Settings instance
     """
     global _settings
     if _settings is None:
-        with _settings_lock:
-            # Double-check inside lock to prevent race conditions
-            if _settings is None:
-                # Find .env file (handles both dev and frozen exe modes)
-                env_path = get_work_dir() / ".env"
+        # Create settings instance first (to access path properties)
+        _settings = Settings()
 
-                # Create settings with explicit env file path
-                if env_path.exists():
-                    _settings = Settings(_env_file=str(env_path))
-                else:
-                    _settings = Settings()
+        # Find .env file in project root using settings path properties
+        env_path = _settings.project_root / ".env"
 
-                # Log deprecation warnings
-                _settings.log_deprecation_warnings()
+        # Reload settings with explicit env file path if it exists
+        if env_path.exists():
+            _settings = Settings(_env_file=str(env_path))
+
+        # Log deprecation warnings
+        _settings.log_deprecation_warnings()
 
     return _settings
 

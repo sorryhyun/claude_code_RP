@@ -5,9 +5,13 @@ This module provides centralized prompt building logic to avoid duplication
 across CRUD operations.
 """
 
+import logging
+
 from config import get_base_system_prompt
 from domain.agent_config import AgentConfigData
-from utils.korean_particles import format_with_particles
+from i18n.korean import format_with_particles
+
+logger = logging.getLogger(__name__)
 
 
 def build_system_prompt(agent_name: str, config_data: AgentConfigData) -> str:

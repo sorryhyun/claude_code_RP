@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Room } from '../../types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +10,7 @@ interface CreateRoomFormProps {
 }
 
 export const CreateRoomForm = ({ onCreateRoom, onClose }: CreateRoomFormProps) => {
+  const { t } = useTranslation('rooms');
   const [newRoomName, setNewRoomName] = useState('');
   const [roomError, setRoomError] = useState<string | null>(null);
 
@@ -21,13 +23,13 @@ export const CreateRoomForm = ({ onCreateRoom, onClose }: CreateRoomFormProps) =
         setNewRoomName('');
         onClose();
       } catch (err) {
-        setRoomError(err instanceof Error ? err.message : 'Failed to create room');
+        setRoomError(err instanceof Error ? err.message : t('failedToCreateRoom'));
       }
     }
   };
 
   return (
-    <div className="p-3 border-b border-sidebar-border bg-sidebar-accent/50">
+    <div className="p-3 border-b border-border bg-muted/50">
       <form onSubmit={handleSubmit} className="space-y-3">
         <Input
           type="text"
@@ -36,17 +38,16 @@ export const CreateRoomForm = ({ onCreateRoom, onClose }: CreateRoomFormProps) =
             setNewRoomName(e.target.value);
             setRoomError(null);
           }}
-          placeholder="Enter room name..."
-          className="bg-sidebar-background border-sidebar-border"
+          placeholder={t('enterRoomName')}
           autoFocus
         />
         {roomError && (
-          <div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+          <div className="text-destructive text-xs sm:text-sm bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
             {roomError}
           </div>
         )}
-        <Button type="submit" className="w-full bg-accent hover:bg-accent/90">
-          Create Room
+        <Button type="submit" className="w-full">
+          {t('createRoom')}
         </Button>
       </form>
     </div>

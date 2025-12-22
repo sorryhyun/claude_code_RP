@@ -21,6 +21,7 @@ from sdk import AgentManager
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
+from infrastructure.images import compress_image_base64
 
 router = APIRouter()
 logger = logging.getLogger("MessageRouter")
@@ -77,13 +78,13 @@ async def get_chatting_agents(
 ):
     """
     Get list of agents currently generating responses in a room.
-    Used by frontend to display 'chatting...' indicators with partial thinking.
+    Used by frontend to display 'chatting...' indicators.
 
     Args:
         room_id: Room ID
 
     Returns:
-        Dict with list of chatting agents (id, name, profile_pic, partial_thinking, partial_content)
+        Dict with list of chatting agents (id, name, profile_pic)
     """
     # Verify room exists (use cache for performance)
     room = await crud.get_room_cached(db, room_id)
@@ -96,24 +97,26 @@ async def get_chatting_agents(
     # Get currently chatting agent IDs from orchestrator
     chatting_agent_ids = chat_orchestrator.get_chatting_agents(room_id, agent_manager)
 
-    # Get streaming state (partial thinking/content) from agent manager
-    streaming_state = agent_manager.get_streaming_state(room_id)
+    # Get current streaming state (thinking/response text) for chatting agents
+    streaming_state = agent_manager.get_streaming_state_for_room(room_id)
 
-    # Get agent details for chatting agents only (more efficient than loading all room agents)
+    # Get agent details for chatting agents (use cache for performance)
     chatting_agents = []
     if chatting_agent_ids:
-        agents = await crud.get_agents_by_ids(db, chatting_agent_ids)
-        for agent in agents:
-            agent_state = streaming_state.get(agent.id, {})
-            chatting_agents.append(
-                {
+        all_agents = await crud.get_agents_cached(db, room_id)
+        agent_map = {agent.id: agent for agent in all_agents}
+
+        for agent_id in chatting_agent_ids:
+            if agent_id in agent_map:
+                agent = agent_map[agent_id]
+                agent_state = streaming_state.get(agent_id, {})
+                chatting_agents.append({
                     "id": agent.id,
                     "name": agent.name,
                     "profile_pic": agent.profile_pic,
-                    "partial_thinking": agent_state.get("thinking", ""),
-                    "partial_content": agent_state.get("content", ""),
-                }
-            )
+                    "thinking_text": agent_state.get("thinking_text", ""),
+                    "response_text": agent_state.get("response_text", ""),
+                })
 
     return {"chatting_agents": chatting_agents}
 
@@ -149,6 +152,28 @@ async def send_message(
     # Ensure the caller owns this room (admins bypass)
     await ensure_room_access(db, room_id, identity)
 
+    # Compress image if present
+    if message.image_data and message.image_media_type:
+        try:
+            logger.info(f"[send_message] Compressing image for room {room_id}")
+            compressed_data, compressed_media_type = compress_image_base64(
+                message.image_data, message.image_media_type
+            )
+            # Calculate compression ratio for logging
+            original_size = len(message.image_data)
+            compressed_size = len(compressed_data)
+            compression_ratio = (1 - compressed_size / original_size) * 100 if original_size > 0 else 0
+            logger.info(
+                f"[send_message] Image compressed: {original_size} -> {compressed_size} bytes "
+                f"({compression_ratio:.1f}% reduction)"
+            )
+            # Update message with compressed data
+            message.image_data = compressed_data
+            message.image_media_type = compressed_media_type
+        except Exception as e:
+            logger.warning(f"[send_message] Image compression failed, using original: {e}")
+            # Continue with original image if compression fails
+
     # Save user message and update room activity atomically
     saved_message = await crud.create_message(db, room_id, message, update_room_activity=True)
     logger.info(f"[send_message] Message saved with ID: {saved_message.id}")
@@ -165,6 +190,7 @@ async def send_message(
                         "content": message.content,
                         "participant_type": message.participant_type,
                         "participant_name": message.participant_name,
+                        "mentioned_agent_ids": message.mentioned_agent_ids,
                     },
                     _manager=None,  # No connection manager needed for polling
                     agent_manager=agent_manager,
@@ -179,10 +205,7 @@ async def send_message(
                 pass  # Session cleanup handled by generator
             break  # Only use first (and only) session
 
-    # Create task and track it in app state for proper cleanup
-    task = asyncio.create_task(trigger_agent_responses())
-    request.app.state.background_tasks.add(task)
-    task.add_done_callback(request.app.state.background_tasks.discard)
+    asyncio.create_task(trigger_agent_responses())
 
     return saved_message
 

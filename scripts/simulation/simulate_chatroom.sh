@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude Code Role Play Chatroom Simulation Script
+# ChitChats Chatroom Simulation Script
 # Usage: ./simulate_chatroom.sh [options]
 #
 # This script simulates multi-agent chatroom conversations via curl API calls.
@@ -14,9 +14,11 @@
 #   -r, --room-name NAME         Room name (default: Simulation_<timestamp>)
 #   -m, --max-interactions N     Maximum interaction rounds (default: 10)
 #   -o, --output FILE            Output file (default: chatroom_<n>.txt)
-#   -u, --url URL                Backend URL (default: http://localhost:8000)
+#   -u, --url URL                Backend URL (default: http://localhost:8001)
 #   --no-system-prompt           Skip system prompt optimization for multi-round talks
+#   --no-thinking                Exclude agent thinking/reasoning from transcript
 #   --save-config                Save system prompt and tool config to separate file
+#   -v, --variants N             Run N parallel simulations with same scenario (default: 1)
 #   -h, --help                   Show this help message
 
 set -e  # Exit on error
@@ -27,8 +29,8 @@ if [ -f ".env" ]; then
 fi
 
 # Default configuration
-BACKEND_URL="${BACKEND_URL:-http://localhost:8000}"
-PASSWORD="${CCRP_PASSWORD:-}"
+BACKEND_URL="${BACKEND_URL:-http://localhost:8001}"
+PASSWORD="${CHITCHATS_PASSWORD:-}"
 JWT_TOKEN="${JWT_TOKEN:-}"
 SCENARIO=""
 AGENTS=""
@@ -39,7 +41,9 @@ POLL_INTERVAL=2  # seconds between polls
 MAX_POLL_ATTEMPTS=600  # 20 minutes max (600 * 2s = 1200s)
 MAX_NO_NEW_MESSAGE=60  # Stop after 60 polls with no new messages (2 minutes of silence)
 NO_SYSTEM_PROMPT=false
+NO_THINKING=false
 SAVE_CONFIG=false
+VARIANTS=1
 
 # Color codes for terminal output
 RED='\033[0;31m'
@@ -87,12 +91,20 @@ while [[ $# -gt 0 ]]; do
             NO_SYSTEM_PROMPT=true
             shift 1
             ;;
+        --no-thinking)
+            NO_THINKING=true
+            shift 1
+            ;;
         --save-config)
             SAVE_CONFIG=true
             shift 1
             ;;
+        -v|--variants)
+            VARIANTS="$2"
+            shift 2
+            ;;
         -h|--help)
-            sed -n '2,20p' "$0" | sed 's/^# //'
+            sed -n '2,22p' "$0" | sed 's/^# //'
             exit 0
             ;;
         *)
@@ -106,7 +118,7 @@ done
 # Validate required parameters
 if [ -z "$PASSWORD" ] && [ -z "$JWT_TOKEN" ]; then
     echo -e "${RED}Error: Password or JWT token is required${NC}"
-    echo "Use -p/--password, -t/--token, set CCRP_PASSWORD environment variable,"
+    echo "Use -p/--password, -t/--token, set CHITCHATS_PASSWORD environment variable,"
     echo "or add JWT_TOKEN to .env file"
     exit 1
 fi
@@ -123,29 +135,54 @@ if [ -z "$AGENTS" ]; then
     exit 1
 fi
 
+# Validate variants
+if ! [[ "$VARIANTS" =~ ^[1-9][0-9]*$ ]]; then
+    echo -e "${RED}Error: Variants must be a positive integer${NC}"
+    exit 1
+fi
+
 # Auto-generate output filename if not specified
 if [ -z "$OUTPUT_FILE" ]; then
     # Find next available chatroom_n.txt filename
     n=1
-    while [ -f "chatroom_${n}.txt" ]; do
-        n=$((n + 1))
-    done
-    OUTPUT_FILE="chatroom_${n}.txt"
+    if [ "$VARIANTS" -eq 1 ]; then
+        while [ -f "chatroom_${n}.txt" ]; do
+            n=$((n + 1))
+        done
+        OUTPUT_FILE="chatroom_${n}.txt"
+    else
+        # For variants, find base number where no variants exist
+        while [ -f "chatroom_${n}_v1.txt" ]; do
+            n=$((n + 1))
+        done
+        OUTPUT_FILE="chatroom_${n}.txt"
+    fi
 fi
+OUTPUT_BASE="${OUTPUT_FILE%.txt}"
 
-echo -e "${BLUE}=== Claude Code Role Play Chatroom Simulation ===${NC}"
+echo -e "${BLUE}=== ChitChats Chatroom Simulation ===${NC}"
 echo "Backend: $BACKEND_URL"
 echo "Room: $ROOM_NAME"
 echo "Agents: $AGENTS"
 echo "Max interactions: $MAX_INTERACTIONS"
-echo "Output: $OUTPUT_FILE"
+if [ "$VARIANTS" -eq 1 ]; then
+    echo "Output: $OUTPUT_FILE"
+else
+    echo "Variants: $VARIANTS (parallel runs)"
+    echo "Output: ${OUTPUT_BASE}_v1.txt ... ${OUTPUT_BASE}_v${VARIANTS}.txt"
+fi
 if [ "$NO_SYSTEM_PROMPT" = false ]; then
     echo "System prompt optimization: Enabled"
 else
     echo "System prompt optimization: Disabled"
 fi
+if [ "$NO_THINKING" = true ]; then
+    echo "Include thinking: No (excluded from transcript)"
+else
+    echo "Include thinking: Yes"
+fi
 if [ "$SAVE_CONFIG" = true ]; then
-    echo "Save configuration: Enabled (${OUTPUT_FILE%.txt}_config.txt)"
+    echo "Save configuration: Enabled (${OUTPUT_BASE}_config.txt)"
 fi
 echo ""
 
@@ -175,7 +212,7 @@ save_config() {
     local agent_names=$2
 
     echo "================================================================================" > "$config_file"
-    echo "Claude Code Role Play System Configuration" >> "$config_file"
+    echo "ChitChats System Configuration" >> "$config_file"
     echo "================================================================================" >> "$config_file"
     echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$config_file"
     echo "Room: $ROOM_NAME" >> "$config_file"
@@ -253,16 +290,156 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
+# Function to run a single simulation variant
+# Arguments: variant_num, variant_room_name, variant_output_file
+run_simulation() {
+    local variant_num=$1
+    local v_room_name=$2
+    local v_output_file=$3
+    local prefix="[v${variant_num}]"
+
+    # Step 2: Create room
+    echo -e "${YELLOW}${prefix} Creating room '$v_room_name'...${NC}"
+    local room_response=$(api_call POST "/rooms" "{\"name\":\"$v_room_name\",\"max_interactions\":$MAX_INTERACTIONS}" "$TOKEN")
+    local room_id=$(echo "$room_response" | jq -r '.id // empty')
+    if [ -z "$room_id" ]; then
+        echo -e "${RED}${prefix} Error: Failed to create room${NC}"
+        echo "$room_response" | jq '.' 2>/dev/null || echo "$room_response"
+        return 1
+    fi
+    echo -e "${GREEN}${prefix} Room created (ID: $room_id)${NC}"
+
+    # Step 4: Add agents to room
+    echo -e "${YELLOW}${prefix} Adding agents to room...${NC}"
+    IFS=',' read -ra agent_array <<< "$AGENTS"
+
+    for agent_name in "${agent_array[@]}"; do
+        agent_name=$(echo "$agent_name" | xargs)
+        local agent_id=$(echo "$ALL_AGENTS" | jq -r ".[] | select(.name==\"$agent_name\") | .id // empty")
+
+        if [ -z "$agent_id" ]; then
+            echo -e "${RED}${prefix} Error: Agent '$agent_name' not found${NC}"
+            return 1
+        fi
+
+        local add_response=$(api_call POST "/rooms/$room_id/agents/$agent_id" "" "$TOKEN")
+        if echo "$add_response" | jq -e '.id' >/dev/null 2>&1; then
+            echo -e "${GREEN}${prefix}   ✓ Added $agent_name${NC}"
+        else
+            echo -e "${RED}${prefix} Error: Failed to add agent '$agent_name'${NC}"
+            return 1
+        fi
+    done
+
+    # Step 5: Send scenario as situation_builder
+    echo -e "${YELLOW}${prefix} Sending scenario...${NC}"
+    local scenario_json=$(echo "$SCENARIO" | jq -Rs .)
+    local send_response=$(api_call POST "/rooms/$room_id/messages/send" \
+        "{\"content\":$scenario_json,\"role\":\"user\",\"participant_type\":\"situation_builder\"}" \
+        "$TOKEN")
+
+    if ! echo "$send_response" | jq -e '.id' >/dev/null 2>&1; then
+        echo -e "${RED}${prefix} Error: Failed to send scenario${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}${prefix} Scenario sent${NC}"
+
+    # Step 6: Poll for messages and save transcript
+    echo -e "${YELLOW}${prefix} Waiting for agents to respond...${NC}"
+    local last_message_id=0
+    local poll_count=0
+    local no_new_message_count=0
+
+    # Initialize output file with header
+    cat > "$v_output_file" << EOF
+================================================================================
+ChitChats Simulation Transcript
+================================================================================
+Room: $v_room_name (ID: $room_id)
+Variant: $variant_num
+Agents: $AGENTS
+Scenario: $SCENARIO
+Max Interactions: $MAX_INTERACTIONS
+System Prompt Optimization: $(if [ "$NO_SYSTEM_PROMPT" = false ]; then echo "Enabled"; else echo "Disabled"; fi)
+Include Thinking: $(if [ "$NO_THINKING" = false ]; then echo "Yes"; else echo "No"; fi)
+Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+================================================================================
+
+EOF
+
+    echo -e "${BLUE}${prefix} Polling for messages...${NC}"
+
+    while [ $poll_count -lt $MAX_POLL_ATTEMPTS ]; do
+        local messages=$(api_call GET "/rooms/$room_id/messages/poll?since_id=$last_message_id" "" "$TOKEN")
+        local new_message_count=$(echo "$messages" | jq 'length')
+
+        if [ "$new_message_count" -gt 0 ]; then
+            no_new_message_count=0
+
+            local jq_filter
+            if [ "$NO_THINKING" = true ]; then
+                jq_filter='.[] |
+                    "--- " +
+                    (if .participant_type == "situation_builder" then "Situation Builder"
+                     elif .participant_type == "user" then "User"
+                     elif .agent_name then .agent_name
+                     else "Unknown" end) +
+                    " (" + .timestamp + ") ---\n" +
+                    .content + "\n"'
+            else
+                jq_filter='.[] |
+                    "--- " +
+                    (if .participant_type == "situation_builder" then "Situation Builder"
+                     elif .participant_type == "user" then "User"
+                     elif .agent_name then .agent_name
+                     else "Unknown" end) +
+                    " (" + .timestamp + ") ---\n" +
+                    (if .thinking and .thinking != "" and .thinking != null then
+                        "[Thinking]\n" + .thinking + "\n[/Thinking]\n\n"
+                     else "" end) +
+                    .content + "\n"'
+            fi
+            echo "$messages" | jq -r "$jq_filter" >> "$v_output_file"
+
+            last_message_id=$(echo "$messages" | jq -r '.[-1].id')
+            echo -e "${GREEN}${prefix}   Received $new_message_count message(s) (poll: $poll_count)${NC}"
+        else
+            no_new_message_count=$((no_new_message_count + 1))
+
+            if [ $no_new_message_count -ge $MAX_NO_NEW_MESSAGE ]; then
+                echo -e "${BLUE}${prefix}   Conversation complete (no messages for $((MAX_NO_NEW_MESSAGE * POLL_INTERVAL))s)${NC}"
+                break
+            fi
+        fi
+
+        sleep $POLL_INTERVAL
+        poll_count=$((poll_count + 1))
+    done
+
+    # Add footer to transcript
+    cat >> "$v_output_file" << EOF
+
+================================================================================
+Simulation Complete
+Variant: $variant_num
+Total Polls: $poll_count
+End Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+================================================================================
+EOF
+
+    echo -e "${GREEN}${prefix} Complete - saved to $v_output_file${NC}"
+    return 0
+}
+
 # Step 1: Authenticate (or use existing token)
 if [ -n "$JWT_TOKEN" ]; then
-    echo -e "${YELLOW}[1/6] Using existing JWT token...${NC}"
+    echo -e "${YELLOW}[1/4] Using existing JWT token...${NC}"
     TOKEN="$JWT_TOKEN"
     echo -e "${GREEN}✓ Token loaded${NC}"
 else
-    echo -e "${YELLOW}[1/6] Authenticating with password...${NC}"
+    echo -e "${YELLOW}[1/4] Authenticating with password...${NC}"
     AUTH_RESPONSE=$(api_call POST "/auth/login" "{\"password\":\"$PASSWORD\"}" "")
 
-    # Extract token
     TOKEN=$(echo "$AUTH_RESPONSE" | jq -r '.api_key // empty')
     if [ -z "$TOKEN" ]; then
         echo -e "${RED}Error: Authentication failed${NC}"
@@ -271,7 +448,6 @@ else
     fi
     echo -e "${GREEN}✓ Authenticated successfully${NC}"
 
-    # Optionally save token to .env for future use
     if [ -f ".env" ] && ! grep -q "^JWT_TOKEN=" .env; then
         echo ""
         echo -e "${BLUE}💡 Tip: Add this line to .env to skip authentication next time:${NC}"
@@ -279,157 +455,76 @@ else
     fi
 fi
 
-# Step 2: Create room
-echo -e "${YELLOW}[2/6] Creating room '$ROOM_NAME'...${NC}"
-ROOM_RESPONSE=$(api_call POST "/rooms" "{\"name\":\"$ROOM_NAME\",\"max_interactions\":$MAX_INTERACTIONS}" "$TOKEN")
-ROOM_ID=$(echo "$ROOM_RESPONSE" | jq -r '.id // empty')
-if [ -z "$ROOM_ID" ]; then
-    echo -e "${RED}Error: Failed to create room${NC}"
-    echo "$ROOM_RESPONSE" | jq '.' 2>/dev/null || echo "$ROOM_RESPONSE"
-    exit 1
-fi
-echo -e "${GREEN}✓ Room created (ID: $ROOM_ID)${NC}"
-
-# Step 3: Get all available agents
-echo -e "${YELLOW}[3/6] Fetching available agents...${NC}"
+# Step 2: Get all available agents (do this once for all variants)
+echo -e "${YELLOW}[2/4] Fetching available agents...${NC}"
 ALL_AGENTS=$(api_call GET "/agents" "" "$TOKEN")
 
-# Step 4: Add agents to room
-echo -e "${YELLOW}[4/6] Adding agents to room...${NC}"
+# Validate agents exist before starting variants
 IFS=',' read -ra AGENT_ARRAY <<< "$AGENTS"
-AGENT_IDS=()
-
 for agent_name in "${AGENT_ARRAY[@]}"; do
-    # Trim whitespace
     agent_name=$(echo "$agent_name" | xargs)
-
-    # Find agent ID by name
     AGENT_ID=$(echo "$ALL_AGENTS" | jq -r ".[] | select(.name==\"$agent_name\") | .id // empty")
-
     if [ -z "$AGENT_ID" ]; then
         echo -e "${RED}Error: Agent '$agent_name' not found${NC}"
         exit 1
     fi
-
-    # Add agent to room
-    ADD_RESPONSE=$(api_call POST "/rooms/$ROOM_ID/agents/$AGENT_ID" "" "$TOKEN")
-    if echo "$ADD_RESPONSE" | jq -e '.id' >/dev/null 2>&1; then
-        echo -e "${GREEN}  ✓ Added $agent_name (ID: $AGENT_ID)${NC}"
-        AGENT_IDS+=("$AGENT_ID")
-    else
-        echo -e "${RED}Error: Failed to add agent '$agent_name'${NC}"
-        echo "$ADD_RESPONSE" | jq '.' 2>/dev/null || echo "$ADD_RESPONSE"
-        exit 1
-    fi
 done
+echo -e "${GREEN}✓ All agents validated${NC}"
 
-# Save configuration if requested
+# Save configuration if requested (do this once)
 if [ "$SAVE_CONFIG" = true ]; then
-    CONFIG_FILE="${OUTPUT_FILE%.txt}_config.txt"
-    echo -e "${YELLOW}Saving system configuration to $CONFIG_FILE...${NC}"
+    CONFIG_FILE="${OUTPUT_BASE}_config.txt"
+    echo -e "${YELLOW}[3/4] Saving system configuration to $CONFIG_FILE...${NC}"
     save_config "$CONFIG_FILE" "$AGENTS"
     echo -e "${GREEN}✓ Configuration saved${NC}"
+else
+    echo -e "${YELLOW}[3/4] Skipping config save (not requested)${NC}"
 fi
 
-# Step 5: Send scenario as situation_builder
-echo -e "${YELLOW}[5/6] Sending scenario...${NC}"
-# Escape JSON string properly
-SCENARIO_JSON=$(echo "$SCENARIO" | jq -Rs .)
-SEND_RESPONSE=$(api_call POST "/rooms/$ROOM_ID/messages/send" \
-    "{\"content\":$SCENARIO_JSON,\"role\":\"user\",\"participant_type\":\"situation_builder\"}" \
-    "$TOKEN")
+# Step 4: Run simulation(s)
+echo -e "${YELLOW}[4/4] Starting simulation(s)...${NC}"
+echo ""
 
-if ! echo "$SEND_RESPONSE" | jq -e '.id' >/dev/null 2>&1; then
-    echo -e "${RED}Error: Failed to send scenario${NC}"
-    echo "$SEND_RESPONSE" | jq '.' 2>/dev/null || echo "$SEND_RESPONSE"
-    exit 1
-fi
-echo -e "${GREEN}✓ Scenario sent${NC}"
+if [ "$VARIANTS" -eq 1 ]; then
+    # Single variant - run directly
+    run_simulation 1 "$ROOM_NAME" "$OUTPUT_FILE"
+    RESULT=$?
+else
+    # Multiple variants - run in parallel
+    echo -e "${BLUE}Launching $VARIANTS parallel simulations...${NC}"
+    PIDS=()
 
-# Step 6: Poll for messages and save transcript
-echo -e "${YELLOW}[6/6] Waiting for agents to respond...${NC}"
-LAST_MESSAGE_ID=0
-POLL_COUNT=0
-NO_NEW_MESSAGE_COUNT=0
+    for v in $(seq 1 $VARIANTS); do
+        v_room="${ROOM_NAME}_v${v}"
+        v_output="${OUTPUT_BASE}_v${v}.txt"
 
-# Initialize output file with header
-cat > "$OUTPUT_FILE" << EOF
-================================================================================
-Claude Code Role Play Simulation Transcript
-================================================================================
-Room: $ROOM_NAME (ID: $ROOM_ID)
-Agents: $AGENTS
-Scenario: $SCENARIO
-Max Interactions: $MAX_INTERACTIONS
-System Prompt Optimization: $(if [ "$NO_SYSTEM_PROMPT" = false ]; then echo "Enabled"; else echo "Disabled"; fi)
-Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-================================================================================
+        run_simulation "$v" "$v_room" "$v_output" &
+        PIDS+=($!)
+        echo -e "${BLUE}  Started variant $v (PID: ${PIDS[-1]})${NC}"
+    done
 
-EOF
+    echo ""
+    echo -e "${BLUE}Waiting for all variants to complete...${NC}"
 
-echo -e "${BLUE}Polling for messages (this may take a while)...${NC}"
+    # Wait for all background processes
+    FAILED=0
+    for i in "${!PIDS[@]}"; do
+        wait "${PIDS[$i]}" || FAILED=$((FAILED + 1))
+    done
 
-while [ $POLL_COUNT -lt $MAX_POLL_ATTEMPTS ]; do
-    # Poll for new messages
-    MESSAGES=$(api_call GET "/rooms/$ROOM_ID/messages/poll?since_id=$LAST_MESSAGE_ID" "" "$TOKEN")
-
-    # Check if we got new messages
-    NEW_MESSAGE_COUNT=$(echo "$MESSAGES" | jq 'length')
-
-    if [ "$NEW_MESSAGE_COUNT" -gt 0 ]; then
-        # Reset no-new-message counter
-        NO_NEW_MESSAGE_COUNT=0
-
-        # Process and append new messages to transcript (including thinking)
-        echo "$MESSAGES" | jq -r '.[] |
-            "--- " +
-            (if .participant_type == "situation_builder" then "Situation Builder"
-             elif .participant_type == "user" then "User"
-             elif .agent_name then .agent_name
-             else "Unknown" end) +
-            " (" + .timestamp + ") ---\n" +
-            (if .thinking and .thinking != "" and .thinking != null then
-                "[Thinking]\n" + .thinking + "\n[/Thinking]\n\n"
-             else "" end) +
-            .content + "\n"' >> "$OUTPUT_FILE"
-
-        # Update last message ID
-        LAST_MESSAGE_ID=$(echo "$MESSAGES" | jq -r '.[-1].id')
-
-        # Print progress
-        echo -e "${GREEN}  Received $NEW_MESSAGE_COUNT new message(s) (total polls: $POLL_COUNT)${NC}"
-    else
-        # Increment no-new-message counter
-        NO_NEW_MESSAGE_COUNT=$((NO_NEW_MESSAGE_COUNT + 1))
-
-        # Check if conversation has ended (no new messages for a while)
-        if [ $NO_NEW_MESSAGE_COUNT -ge $MAX_NO_NEW_MESSAGE ]; then
-            echo -e "${BLUE}  No new messages for ${MAX_NO_NEW_MESSAGE} polls ($((MAX_NO_NEW_MESSAGE * POLL_INTERVAL)) seconds).${NC}"
-            echo -e "${BLUE}  Conversation appears complete.${NC}"
-            break
-        fi
+    if [ $FAILED -gt 0 ]; then
+        echo -e "${RED}Warning: $FAILED variant(s) failed${NC}"
     fi
-
-    # Wait before next poll
-    sleep $POLL_INTERVAL
-    POLL_COUNT=$((POLL_COUNT + 1))
-done
-
-# Add footer to transcript
-cat >> "$OUTPUT_FILE" << EOF
-
-================================================================================
-Simulation Complete
-Total Polls: $POLL_COUNT
-End Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-================================================================================
-EOF
+fi
 
 echo ""
 echo -e "${GREEN}=== Simulation Complete ===${NC}"
-echo -e "Transcript saved to: ${BLUE}$OUTPUT_FILE${NC}"
-if [ "$SAVE_CONFIG" = true ]; then
-    echo -e "Configuration saved to: ${BLUE}${OUTPUT_FILE%.txt}_config.txt${NC}"
+if [ "$VARIANTS" -eq 1 ]; then
+    echo -e "Transcript saved to: ${BLUE}$OUTPUT_FILE${NC}"
+else
+    echo -e "Transcripts saved to: ${BLUE}${OUTPUT_BASE}_v1.txt ... ${OUTPUT_BASE}_v${VARIANTS}.txt${NC}"
 fi
-echo -e "Room ID: ${BLUE}$ROOM_ID${NC} (you can view it in the web interface)"
+if [ "$SAVE_CONFIG" = true ]; then
+    echo -e "Configuration saved to: ${BLUE}${OUTPUT_BASE}_config.txt${NC}"
+fi
 echo ""

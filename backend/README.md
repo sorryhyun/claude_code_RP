@@ -1,6 +1,6 @@
 # Backend Documentation
 
-Claude Code Role Play backend: FastAPI application with SQLAlchemy (async) + SQLite for multi-agent chat orchestration using the Anthropic Claude Agent SDK.
+ChitChats backend: FastAPI application with SQLAlchemy (async) + PostgreSQL for multi-agent chat orchestration using the Anthropic Claude Agent SDK.
 
 ## Quick Start
 
@@ -21,7 +21,7 @@ See [../SETUP.md](../SETUP.md) for authentication setup.
 ## Architecture Overview
 
 **Core Stack:**
-- FastAPI + SQLAlchemy (async) + SQLite (WAL mode)
+- FastAPI + SQLAlchemy (async) + PostgreSQL (asyncpg)
 - Claude Agent SDK for AI interactions
 - APScheduler for background autonomous conversations
 - HTTP polling for real-time updates
@@ -40,40 +40,30 @@ See [../SETUP.md](../SETUP.md) for authentication setup.
 ```
 backend/
 ├── main.py                        # FastAPI application entry point
-├── database.py                    # SQLAlchemy async setup (WAL mode)
+├── database.py                    # SQLAlchemy async setup (PostgreSQL)
 ├── models.py                      # ORM models
 ├── crud.py                        # Database operations
 ├── schemas.py                     # Pydantic models
 ├── auth.py                        # JWT authentication
 ├── dependencies.py                # Dependency injection
 ├── background_scheduler.py        # APScheduler for autonomous chats
-├── config/                        # Configuration system (modular)
-│   ├── config_loader.py          # Facade - re-exports from submodules
-│   ├── cache.py                  # YAML caching with mtime invalidation
-│   ├── loaders.py                # Config file loaders
-│   ├── tools.py                  # Tool descriptions, schemas, grouping
-│   ├── memory.py                 # Memory brain prompts, policies
-│   ├── validation.py             # Schema validation, startup logging
+├── config/                        # Configuration system
+│   ├── config_loader.py          # YAML hot-reloading with file locking
 │   ├── parser.py                 # Agent config parser
 │   └── tools/                    # YAML configuration files
 │       ├── tools.yaml            # Tool definitions
-│       ├── guidelines_3rd.yaml   # System prompt template
-│       ├── brain_config.yaml     # Memory brain configuration
+│       ├── guidelines_3rd.yaml   # System prompt template (current)
+│       ├── guidelines_v2.yaml    # Legacy v2 guidelines
+│       ├── conversation_context.yaml # Conversation context template
 │       └── debug.yaml            # Debug logging config
-├── core/                          # Core application setup
-│   ├── app_factory.py            # FastAPI app creation with lifespan
-│   ├── settings.py               # Application settings
-│   └── logging.py                # Logging configuration
 ├── domain/                        # Domain models
-│   ├── task_identifier.py        # TaskIdentifier dataclass
+│   ├── task_identifier.py        # TaskIdentifier dataclass (Phase 5)
 │   ├── agent_config.py           # AgentConfigData
-│   ├── memory.py                 # Memory types and policies
 │   └── contexts.py               # Context dataclasses
 ├── orchestration/                 # Multi-agent conversation orchestration
 │   ├── orchestrator.py           # ChatOrchestrator
-│   ├── response_generator.py     # Response generation with memory
+│   ├── response_generator.py     # Response generation
 │   ├── context.py                # Conversation context builder
-│   ├── memory_brain.py           # Memory-brain agent
 │   └── handlers.py               # Typing indicators, broadcasting
 ├── routers/                       # REST API endpoints
 │   ├── auth.py                   # Authentication
@@ -82,22 +72,28 @@ backend/
 │   ├── agent_management.py       # Agent CRUD
 │   ├── room_agents.py            # Room-agent associations
 │   └── messages.py               # Messaging and polling
-├── sdk/                           # Claude SDK integration
+├── sdk/                           # Claude SDK integration (Phase 5 refactored)
 │   ├── manager.py                # AgentManager (orchestration)
 │   ├── client_pool.py            # ClientPool (lifecycle management)
 │   ├── stream_parser.py          # StreamParser (message parsing)
 │   ├── action_tools.py           # skip, memorize, recall (for chat agents)
-│   ├── brain_tools.py            # memory selection & config (for memory brain)
 │   └── guidelines_tools.py       # guidelines read tool
 ├── services/                      # Business logic layer
 │   ├── agent_service.py          # Agent business logic
 │   └── agent_config_service.py   # Config file I/O
-├── utils/                         # Utilities
-│   ├── write_queue.py            # Single-writer pattern for SQLite
-│   ├── migrations.py             # Automatic schema migrations
-│   ├── file_locking.py           # Cross-platform file locking
-│   ├── memory_parser.py          # Long-term memory parser
-│   └── korean_particles.py       # Korean grammar support
+├── infrastructure/                # Infrastructure utilities
+│   ├── cache.py                  # In-memory caching
+│   ├── images.py                 # WebP image compression
+│   ├── locking.py                # Cross-platform file locking
+│   ├── database/
+│   │   └── migrations.py         # Automatic schema migrations
+│   └── logging/
+│       ├── agent_logger.py       # Agent debug logging
+│       └── formatters.py         # Debug message formatting
+├── i18n/                          # Internationalization
+│   ├── korean.py                 # Korean particle support (은/는, 이/가)
+│   ├── serializers.py            # Datetime/bool serialization
+│   └── timezone.py               # UTC/KST conversion
 └── tests/                         # Test suite
     ├── unit/                     # Unit tests
     └── integration/              # Integration tests
@@ -118,15 +114,9 @@ backend/
 
 ### 2. Database Layer
 
-**Database:** SQLite with aiosqlite, async sessions, WAL mode, NullPool, 30s timeout
+**Database:** PostgreSQL with asyncpg, async sessions, connection pooling
 
-**Write Queue (`utils/write_queue.py`):**
-- Single-writer pattern eliminates SQLite write contention
-- Background task serializes all DB writes
-- Graceful shutdown with pending operation draining
-- Fallback to direct execution if queue not initialized
-
-**Automatic Migrations:** Schema changes handled automatically via `utils/migrations.py`. No manual database deletion needed.
+**Automatic Migrations:** Schema changes handled automatically via `infrastructure/database/migrations.py`. No manual database deletion needed.
 
 **Models:**
 - `Room`: Many-to-many with agents, `max_interactions`, `is_paused`, `last_read_at`, computed `has_unread`
@@ -144,30 +134,10 @@ backend/
 
 **Filesystem-Primary:** All configurations loaded from filesystem with hot-reloading. Changes apply immediately.
 
-**Modular Architecture:**
-```
-config/
-├── config_loader.py    # Facade - backward-compatible re-exports
-├── cache.py            # Caching with mtime-based invalidation
-├── loaders.py          # Raw file loaders (get_tools_config, etc.)
-├── tools.py            # Tool descriptions, schemas, grouping
-├── memory.py           # Memory brain prompts and policies
-├── validation.py       # Schema validation, startup diagnostics
-└── tools/              # YAML configuration files
-```
-
 **YAML Configuration Files (`config/tools/`):**
 - `tools.yaml`: Tool definitions (skip, memorize, recall, guidelines, configuration)
 - `guidelines_3rd.yaml`: System prompt template with `{agent_name}` placeholders
-- `brain_config.yaml`: Memory brain policies and defaults
 - `debug.yaml`: Debug logging configuration
-
-**Startup Validation:** On app startup, validates all config files and logs:
-- Active guidelines version
-- Active system prompt
-- Memory mode (RECALL or BRAIN)
-- Enabled tools count
-- Debug logging status
 
 **Agent Configuration:**
 
@@ -179,7 +149,6 @@ agents/
     ├── characteristics.md     # Personality traits (third-person)
     ├── recent_events.md      # Auto-updated
     ├── consolidated_memory.md # Long-term memories (optional)
-    ├── memory_brain.md       # Memory-brain config (optional)
     └── profile.png           # Profile picture (optional)
 ```
 
@@ -204,7 +173,7 @@ AgentManager (445 lines) - Orchestrates responses and interruption
 - **Client Management:** Uses ClientPool with `TaskIdentifier(room_id, agent_id)` keys
 - **Interruption Support:** `interrupt_all()`, `interrupt_room()`, `interrupt_agent()`
 - **Response Generation:** `generate_sdk_response()` yields stream events
-- Model: `claude-opus-4-5-20251101`, 32K thinking tokens
+- Model: `claude-opus-4-5-20251101` (default) or `claude-haiku-4-5-20251001` (with `USE_HAIKU=true`), 32K thinking tokens
 
 **ClientPool (`sdk/client_pool.py`):**
 - **SDK Best Practices:** Reuse clients within sessions, connection locking, exponential backoff retry
@@ -218,7 +187,6 @@ AgentManager (445 lines) - Orchestrates responses and interruption
 **MCP Tools:**
 - **Action Tools:** `skip`, `memorize` (append to recent_events.md), `recall` (retrieve long-term memories)
 - **Config Tools:** `guidelines`, `configuration`
-- **Memory Tools:** `select_memory` (for memory-brain)
 
 ### 5. Chat Orchestration (`orchestration/`)
 
@@ -230,13 +198,7 @@ AgentManager (445 lines) - Orchestrates responses and interruption
 
 **ResponseGenerator (`response_generator.py`):**
 - **Context building:** `build_conversation_context()` with message filtering
-- **Memory-brain integration:** Calls memory-brain to surface relevant long-term memories
 - **Interruption checks:** Compares timestamps before saving
-
-**Memory-Brain (`memory_brain.py`):**
-- Separate agent for intelligent memory selection
-- Policies: `balanced`, `trauma_biased`, `genius_planner`, `optimistic`, `avoidant`
-- Max 3 memories per turn, 10-turn cooldown
 
 ### 6. Authentication (`auth.py`)
 
@@ -257,24 +219,12 @@ See [../SETUP.md](../SETUP.md) for details.
 **1. Recent Events (Short-term)**
 - Storage: `agents/{name}/recent_events.md`
 - Format: `- [2025-11-18] Event description - emotional core`
-- Updates: Agents use `memorize` tool (requires `MEMORY_BY=RECALL`)
+- Updates: Agents use `memorize` tool
 
 **2. Long-term Memory**
-- Storage: `agents/{name}/long_term_memory.md` or `consolidated_memory.md`
+- Storage: `agents/{name}/consolidated_memory.md` (or `long_term_memory.md`)
 - Format: `## Subtitle\nMemory content...`
-
-### Memory Modes (`MEMORY_BY` env var)
-
-**RECALL Mode (default):**
-- On-demand retrieval via `recall` tool
-- Lower token cost (only subtitles in context)
-- Agent-controlled
-
-**BRAIN Mode:**
-- Automatic memory surfacing via memory-brain agent
-- Higher token cost (pre-loaded memories)
-- Context-driven with psychological realism
-- Requires `memory_brain.md` with `enabled: true`
+- Retrieval: On-demand via `recall` tool - agents actively fetch specific memories by subtitle
 
 ## API Endpoints
 
@@ -341,18 +291,26 @@ All endpoints except `/auth/*`, `/health`, `/docs`, and profile pictures require
 - `USER_NAME` - Display name for user messages (default: "User")
 - `DEBUG_AGENTS` - "true" for verbose logging
 - `MEMORY_BY` - Memory mode: `RECALL` (default) or `BRAIN`
+- `RECALL_MEMORY_FILE` - Memory file for recall mode: `consolidated_memory` (default) or `long_term_memory`
+- `READ_GUIDELINE_BY` - Guideline delivery mode: `active_tool` (default) or `description`
+- `USE_HAIKU` - "true" to use Haiku model instead of Opus (default: false)
+- `PRIORITY_AGENTS` - Comma-separated agent names for priority responding
+- `MAX_CONCURRENT_ROOMS` - Max rooms for background scheduler (default: 5)
+- `ENABLE_GUEST_LOGIN` - "true"/"false" to enable/disable guest login (default: true)
 - `FRONTEND_URL` - CORS allowed origin
 - `VERCEL_URL` - Auto-detected on Vercel
 - `GUEST_PASSWORD_HASH` - Optional guest access
 
 ### Database
 
-**Location:** `./chitchats.db`
+**Connection:** PostgreSQL via `DATABASE_URL` environment variable
 
-**Features:** WAL mode, automatic migrations, no manual deletion needed
+**Format:** `postgresql+asyncpg://user:password@host:port/database`
+
+**Features:** Connection pooling, automatic migrations, no manual schema changes needed
 
 **Complete Reset:**
-1. Delete `chitchats.db`
+1. Drop and recreate the database: `dropdb chitchats && createdb chitchats`
 2. Restart backend
 3. Agents re-seeded from `agents/` directory
 
@@ -362,7 +320,7 @@ All endpoints except `/auth/*`, `/health`, `/docs`, and profile pictures require
 
 **Add DB field:**
 1. Update `models.py`
-2. Add migration in `utils/migrations.py`
+2. Add migration in `infrastructure/database/migrations.py`
 3. Update `schemas.py` and `crud.py`
 4. Restart (migration runs automatically)
 
@@ -373,9 +331,8 @@ All endpoints except `/auth/*`, `/health`, `/docs`, and profile pictures require
 4. Create router endpoint in `routers/`
 
 **Add MCP tool:**
-1. Define in `sdk/*_tools.py`
+1. Define in `sdk/action_tools.py` or `sdk/guidelines_tools.py`
 2. Add config to `config/tools/tools.yaml`
-3. Update export in `sdk/tools.py`
 
 **Update system prompt/guidelines:**
 1. Edit `config/tools/guidelines_3rd.yaml`
@@ -437,20 +394,18 @@ debug:
 - Check if room is paused
 
 **Memory not working:**
-- Verify `MEMORY_BY=RECALL` for `memorize` tool
 - Check long-term memory file exists for `recall`
-- Verify `memory_brain.md` exists for memory-brain
 
-**Database lock errors:**
-- Normal in high concurrency (exponential backoff retry)
-- WAL mode enabled
-- 30s busy_timeout configured
+**Connection pool exhaustion:**
+- Check `pool_size` and `max_overflow` in `database.py`
+- Current defaults: pool_size=10, max_overflow=20
+- Consider increasing for high-traffic deployments
 
 ## Dependencies
 
 **Package Manager:** uv (Python 3.11+)
 
-**Core:** FastAPI, uvicorn, APScheduler, SQLAlchemy, aiosqlite
+**Core:** FastAPI, uvicorn, APScheduler, SQLAlchemy, asyncpg
 
 **AI:** claude-agent-sdk
 

@@ -10,13 +10,14 @@ from unittest.mock import AsyncMock, Mock, mock_open, patch
 
 import pytest
 from domain.contexts import OrchestrationContext
-from orchestration.response_generator import ResponseGenerator, save_critic_report
+from orchestration.critic import save_critic_report
+from orchestration.response_generator import ResponseGenerator
 
 
 class TestSaveCriticReport:
     """Tests for save_critic_report function."""
 
-    @patch("orchestration.response_generator.os.makedirs")
+    @patch("orchestration.critic.os.makedirs")
     @patch("builtins.open", new_callable=mock_open)
     def test_save_critic_report_creates_file(self, mock_file, mock_makedirs):
         """Test that critic report is saved to file."""
@@ -33,7 +34,7 @@ class TestSaveCriticReport:
         assert "Diagnostic report content" in written_content
         assert "Thinking process" in written_content
 
-    @patch("orchestration.response_generator.os.makedirs", side_effect=Exception("Write error"))
+    @patch("orchestration.critic.os.makedirs", side_effect=Exception("Write error"))
     def test_save_critic_report_handles_errors(self, mock_makedirs):
         """Test that errors are handled gracefully."""
         # Should not raise exception
@@ -46,67 +47,9 @@ class TestResponseGeneratorInit:
     def test_init(self):
         """Test initialization."""
         last_user_msg_time = {1: 123.456}
-        mock_memory_brain = Mock()
-        generator = ResponseGenerator(last_user_msg_time, mock_memory_brain)
+        generator = ResponseGenerator(last_user_msg_time)
 
         assert generator.last_user_message_time == last_user_msg_time
-        assert generator.memory_brain == mock_memory_brain
-
-
-class TestHasNewMessages:
-    """Tests for _has_new_messages method."""
-
-    def test_has_new_messages_with_content(self):
-        """Test with actual message content."""
-        generator = ResponseGenerator({}, Mock())
-
-        context = "Alice: Hello\nBob: Hi there"
-
-        assert generator._has_new_messages(context) is True
-
-    def test_has_new_messages_empty(self):
-        """Test with empty context."""
-        generator = ResponseGenerator({}, Mock())
-
-        assert generator._has_new_messages("") is False
-
-    def test_has_new_messages_only_header_footer(self):
-        """Test with only header/footer lines."""
-        generator = ResponseGenerator({}, Mock())
-
-        context = "Here's the recent conversation\nRespond naturally"
-
-        assert generator._has_new_messages(context) is False
-
-
-class TestWasInterrupted:
-    """Tests for _was_interrupted method."""
-
-    def test_was_interrupted_true(self):
-        """Test when response was interrupted."""
-        generator = ResponseGenerator({1: 200.0}, Mock())
-
-        # Response started at 100, but user message arrived at 200
-        is_interrupted = generator._was_interrupted(1, 100.0, "Alice")
-
-        assert is_interrupted is True
-
-    def test_was_interrupted_false(self):
-        """Test when response was not interrupted."""
-        generator = ResponseGenerator({1: 100.0}, Mock())
-
-        # Response started at 200, after user message at 100
-        is_interrupted = generator._was_interrupted(1, 200.0, "Alice")
-
-        assert is_interrupted is False
-
-    def test_was_interrupted_no_user_message(self):
-        """Test when no user message recorded for room."""
-        generator = ResponseGenerator({}, Mock())
-
-        is_interrupted = generator._was_interrupted(1, 100.0, "Alice")
-
-        assert is_interrupted is False
 
 
 class TestGenerateResponse:
@@ -115,7 +58,7 @@ class TestGenerateResponse:
     @pytest.mark.asyncio
     async def test_generate_response_basic_flow(self):
         """Test basic response generation."""
-        generator = ResponseGenerator({}, Mock())
+        generator = ResponseGenerator({})
 
         mock_db = AsyncMock()
         mock_agent_manager = Mock()  # Use Mock instead of AsyncMock for generate_sdk_response
@@ -156,10 +99,11 @@ class TestGenerateResponse:
                 "orchestration.response_generator.crud.create_message",
                 new=AsyncMock(return_value=Mock(id=1, timestamp=datetime.utcnow())),
             ),
-            patch("orchestration.response_generator.build_conversation_context", return_value="Context"),
-            patch("orchestration.response_generator.broadcast_stream_start", new=AsyncMock()),
-            patch("orchestration.response_generator.broadcast_stream_delta", new=AsyncMock()),
-            patch("orchestration.response_generator.broadcast_stream_end", new=AsyncMock()),
+            patch(
+                "orchestration.response_generator.build_conversation_context",
+                return_value=[{"type": "text", "text": "Context"}],
+            ),
+            patch("orchestration.response_generator.save_agent_message", new=AsyncMock(return_value=1)),
         ):
             responded = await generator.generate_response(
                 orch_context=orch_context, agent=mock_agent, user_message_content="Hello"
@@ -171,11 +115,10 @@ class TestGenerateResponse:
     @pytest.mark.asyncio
     async def test_generate_response_handles_skip(self):
         """Test when agent chooses to skip."""
-        generator = ResponseGenerator({}, Mock())
+        generator = ResponseGenerator({})
 
         mock_db = AsyncMock()
         mock_agent_manager = Mock()
-        mock_agent_manager.broadcast = AsyncMock()
         mock_agent = Mock(id=1, name="Alice", system_prompt="Prompt", profile_pic=None)
         mock_agent.get_config_data.return_value = Mock(long_term_memory_index=None)
 
@@ -210,8 +153,10 @@ class TestGenerateResponse:
                 "orchestration.response_generator.crud.create_message",
                 new=AsyncMock(return_value=Mock(id=1, timestamp=datetime.utcnow())),
             ),
-            patch("orchestration.response_generator.build_conversation_context", return_value="Context"),
-            patch("orchestration.response_generator.broadcast_stream_start", new=AsyncMock()),
+            patch(
+                "orchestration.response_generator.build_conversation_context",
+                return_value=[{"type": "text", "text": "Context"}],
+            ),
         ):
             responded = await generator.generate_response(
                 orch_context=orch_context, agent=mock_agent, user_message_content="Hello"
@@ -223,7 +168,7 @@ class TestGenerateResponse:
     @pytest.mark.asyncio
     async def test_generate_response_for_critic(self):
         """Test response generation for critic agent."""
-        generator = ResponseGenerator({}, Mock())
+        generator = ResponseGenerator({})
 
         mock_db = AsyncMock()
         mock_agent_manager = Mock()
@@ -262,9 +207,12 @@ class TestGenerateResponse:
                 "orchestration.response_generator.crud.create_message",
                 new=AsyncMock(return_value=Mock(id=1, timestamp=datetime.utcnow())),
             ),
-            patch("orchestration.response_generator.build_conversation_context", return_value="Context"),
+            patch(
+                "orchestration.response_generator.build_conversation_context",
+                return_value=[{"type": "text", "text": "Context"}],
+            ),
             patch("orchestration.response_generator.save_critic_report") as mock_save_report,
-            patch("orchestration.response_generator.broadcast_stream_end", new=AsyncMock()),
+            patch("orchestration.response_generator.save_agent_message", new=AsyncMock(return_value=1)),
         ):
             responded = await generator.generate_response(
                 orch_context=orch_context, agent=mock_agent, user_message_content="Hello", is_critic=True
@@ -278,7 +226,7 @@ class TestGenerateResponse:
     @pytest.mark.asyncio
     async def test_generate_response_checks_interruption(self):
         """Test that interrupted responses are discarded."""
-        generator = ResponseGenerator({1: time.time() + 1000}, Mock())  # Future time = interrupted
+        generator = ResponseGenerator({1: time.time() + 1000})  # Future time = interrupted
 
         mock_db = AsyncMock()
         mock_agent_manager = Mock()
@@ -312,7 +260,10 @@ class TestGenerateResponse:
             ),
             patch("orchestration.response_generator.crud.get_room_agent_session", return_value=None),
             patch("orchestration.response_generator.crud.update_room_agent_session", new=AsyncMock()),
-            patch("orchestration.response_generator.build_conversation_context", return_value="Context"),
+            patch(
+                "orchestration.response_generator.build_conversation_context",
+                return_value=[{"type": "text", "text": "Context"}],
+            ),
         ):
             responded = await generator.generate_response(
                 orch_context=orch_context, agent=mock_agent, user_message_content="Hello"
@@ -324,7 +275,7 @@ class TestGenerateResponse:
     @pytest.mark.asyncio
     async def test_generate_response_checks_paused_room(self):
         """Test that responses are discarded if room was paused."""
-        generator = ResponseGenerator({}, Mock())
+        generator = ResponseGenerator({})
 
         mock_db = AsyncMock()
         mock_agent_manager = Mock()
@@ -358,7 +309,10 @@ class TestGenerateResponse:
             ),
             patch("orchestration.response_generator.crud.get_room_agent_session", return_value=None),
             patch("orchestration.response_generator.crud.update_room_agent_session", new=AsyncMock()),
-            patch("orchestration.response_generator.build_conversation_context", return_value="Context"),
+            patch(
+                "orchestration.response_generator.build_conversation_context",
+                return_value=[{"type": "text", "text": "Context"}],
+            ),
         ):
             responded = await generator.generate_response(
                 orch_context=orch_context, agent=mock_agent, user_message_content="Hello"
@@ -370,7 +324,7 @@ class TestGenerateResponse:
     @pytest.mark.asyncio
     async def test_generate_response_skip_if_no_new_messages(self):
         """Test skipping when no new messages in follow-up round."""
-        generator = ResponseGenerator({}, Mock())
+        generator = ResponseGenerator({})
 
         mock_db = AsyncMock()
         mock_agent_manager = AsyncMock()
@@ -389,7 +343,7 @@ class TestGenerateResponse:
                 new=AsyncMock(return_value=[]),
             ),
             patch("orchestration.response_generator.crud.get_room_agent_session", return_value=None),
-            patch("orchestration.response_generator.build_conversation_context", return_value=""),
+            patch("orchestration.response_generator.build_conversation_context", return_value=[]),
         ):  # Empty context
             responded = await generator.generate_response(
                 orch_context=orch_context,

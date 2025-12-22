@@ -19,8 +19,6 @@ import bcrypt
 import jwt
 from core import get_settings
 from fastapi import HTTPException, Request, status
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger("Auth")
 
@@ -130,19 +128,19 @@ def get_jwt_secret() -> str:
     """
     Get the JWT secret key from environment variable.
 
-    If not set, generates a random secret for the session.
-    WARNING: Using a random secret means tokens won't survive server restarts.
+    Raises:
+        SystemExit: If JWT_SECRET is not set in production
 
     Returns:
         str: The JWT secret key
     """
     jwt_secret = os.getenv("JWT_SECRET") or get_settings().jwt_secret
     if not jwt_secret:
-        # Generate a random secret for this session
-        jwt_secret = secrets.token_hex(32)
-        logger.warning("⚠️  WARNING: JWT_SECRET not set. Using random session secret.")
-        logger.warning("⚠️  Tokens will be invalidated on server restart.")
-        logger.warning("💡 To fix: Set JWT_SECRET in .env to a secure random string")
+        logger.error("❌ ERROR: JWT_SECRET is not set in environment variables!")
+        logger.error("❌ Without a stable secret, tokens will be invalidated on every server restart.")
+        logger.error("💡 To fix: Generate a secret with 'python -c \"import secrets; print(secrets.token_hex(32))\"'")
+        logger.error("💡 Then add JWT_SECRET=<your_secret> to your .env file")
+        sys.exit(1)
     return jwt_secret
 
 
@@ -235,76 +233,113 @@ def get_user_id_from_token(token: str) -> str | None:
     return payload.get("user_id")
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
+class AuthMiddleware:
     """
-    Middleware to check JWT token authentication.
+    Pure ASGI middleware for JWT token authentication.
+
+    Using pure ASGI instead of BaseHTTPMiddleware to support SSE/streaming responses
+    (required for MCP endpoint compatibility).
 
     Authentication methods:
     - REST API: X-API-Key header (contains JWT token)
 
     Excluded paths (no auth required):
     - /auth/login - Login endpoint
-    - /health - Health check
+    - /auth/health - Health check
     - /docs, /openapi.json, /redoc - API documentation
+    - /mcp - MCP endpoint (SSE streaming)
     """
 
     # Paths that don't require authentication
-    EXCLUDED_PATHS = [
+    EXCLUDED_PATHS = {
         "/",
         "/docs",
         "/openapi.json",
         "/redoc",
         "/auth/login",
-        "/health",
-    ]
+        "/auth/health",
+    }
 
-    async def dispatch(self, request: Request, call_next):
-        path = request.url.path
+    # Path prefixes that don't require authentication
+    EXCLUDED_PREFIXES = (
+        "/mcp",  # MCP endpoint (handles its own auth via MCP protocol)
+    )
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope["path"]
+        method = scope["method"]
+        headers = dict(scope.get("headers", []))
 
         # Skip auth for excluded paths
         if path in self.EXCLUDED_PATHS:
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
-        # Skip auth for static assets (bundled frontend)
-        if path.startswith("/assets/") or path.endswith((".js", ".css", ".svg", ".png", ".ico", ".woff", ".woff2")):
-            return await call_next(request)
+        # Skip auth for excluded prefixes (like /mcp)
+        if path.startswith(self.EXCLUDED_PREFIXES):
+            await self.app(scope, receive, send)
+            return
 
         # Skip auth for profile picture requests (needed for <img> tags)
         if path.startswith("/agents/") and path.endswith("/profile-pic"):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         # Skip auth for OPTIONS requests (CORS preflight)
-        if request.method == "OPTIONS":
-            return await call_next(request)
+        if method == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
 
         # Extract token from header
-        token = request.headers.get("X-API-Key")
+        token = headers.get(b"x-api-key", b"").decode("utf-8") or None
 
         # Validate JWT token
         token_payload = validate_jwt_token(token) if token else None
         if not token_payload:
-            # Get origin from request headers for CORS
-            origin = request.headers.get("origin")
-            response = JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Invalid or missing authentication token"}
-            )
-            # Add CORS headers to error response
+            # Build 401 response
+            origin = headers.get(b"origin", b"").decode("utf-8")
+            response_headers = [
+                (b"content-type", b"application/json"),
+            ]
             if origin:
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers["Access-Control-Allow-Credentials"] = "true"
-                response.headers["Access-Control-Allow-Methods"] = "*"
-                response.headers["Access-Control-Allow-Headers"] = "*"
-            return response
+                response_headers.extend([
+                    (b"access-control-allow-origin", origin.encode()),
+                    (b"access-control-allow-credentials", b"true"),
+                    (b"access-control-allow-methods", b"*"),
+                    (b"access-control-allow-headers", b"*"),
+                ])
 
-        # Store the role and user_id in request state for later use
-        request.state.user_role = token_payload.get("role", "admin")
-        request.state.user_id = token_payload.get("user_id") or (
-            "admin" if request.state.user_role == "admin" else "guest"
+            body = b'{"detail":"Invalid or missing authentication token"}'
+            response_headers.append((b"content-length", str(len(body)).encode()))
+
+            await send({
+                "type": "http.response.start",
+                "status": 401,
+                "headers": response_headers,
+            })
+            await send({
+                "type": "http.response.body",
+                "body": body,
+            })
+            return
+
+        # Store auth info in scope state for later use
+        if "state" not in scope:
+            scope["state"] = {}
+        scope["state"]["user_role"] = token_payload.get("role", "admin")
+        scope["state"]["user_id"] = token_payload.get("user_id") or (
+            "admin" if scope["state"]["user_role"] == "admin" else "guest"
         )
 
         # Continue processing the request
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
 
 
 def require_admin(request: Request):

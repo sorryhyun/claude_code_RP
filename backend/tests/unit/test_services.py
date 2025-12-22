@@ -136,7 +136,7 @@ class TestAgentConfigService:
         assert config.in_a_nutshell == "Test agent nutshell"
         assert config.characteristics == "Test characteristics"
         assert config.recent_events == "Test recent events"
-        # Verify that fields are accessible as attributes
+        # Verify the config is an AgentConfigData object
         assert hasattr(config, "in_a_nutshell")
         assert hasattr(config, "characteristics")
         assert hasattr(config, "recent_events")

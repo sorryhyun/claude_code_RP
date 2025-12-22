@@ -1,11 +1,11 @@
-# Claude Code Role Play
+# ChitChats
 
-A real-time multi-CC(Claude code) chat application where multiple AI personalities interact in shared rooms.
+A real-time multi-agent chat application where multiple Claude AI personalities interact in shared rooms.
 
 ## Features
 
 - **Multi-agent conversations** - Multiple Claude agents with distinct personalities chat together
-- **HTTP Polling** - Real-time message updates via polling (2-second intervals)
+- **HTTP Polling** - Real-time message updates via polling (2-second intervals for messages and status)
 - **Agent customization** - Configure personalities via markdown files with profile pictures
 - **1-on-1 direct chats** - Private conversations with individual agents
 - **Extended thinking** - View agent reasoning process (32K thinking tokens)
@@ -14,7 +14,7 @@ A real-time multi-CC(Claude code) chat application where multiple AI personaliti
 
 ## Tech Stack
 
-**Backend:** FastAPI, SQLAlchemy (async), SQLite, Anthropic Claude SDK
+**Backend:** FastAPI, SQLAlchemy (async), PostgreSQL, Anthropic Claude SDK
 **Frontend:** React, TypeScript, Vite, Tailwind CSS
 
 ## Quick Start
@@ -60,6 +60,11 @@ or
 ```bash
 make evaluate-agents ARGS='--target-agent "프리렌" --evaluator "페른" --questions 2'
 ```
+or
+```bash
+./scripts/simulation/simulate_chatroom.sh -s "덴지와 레제가 전투 후 카페에서 만나기로 한 날, 덴지는 우연히 마키마가 레제를 죽이려고 하려는 찰나를 목격한다. 덴지가 '아' 라고 하는 순간, 마키마는 레제에게 손가락을 겨누고 '빵'이라고 말했다. (다른 캐릭터들이 아닌, 마키마가 쏠 위치를 정한다)" -a "덴지,레제,마키마" --max-interactions 10 -p sorrysorry --variants 3 --no-thinking
+```
+
 See [SIMULATIONS.md](SIMULATIONS.md) and [SETUP.md](SETUP.md) for details.
 
 ## Agent Configuration
@@ -74,7 +79,6 @@ agents/
     ├── recent_events.md       # Auto-updated from conversations
     ├── anti_pattern.md        # Behaviors to avoid (optional)
     ├── consolidated_memory.md # Long-term memories with subtitles (optional)
-    ├── memory_brain.md        # Memory-brain configuration (optional)
     └── profile.*              # Optional profile picture (png, jpg, jpeg, gif, webp, svg)
 ```
 
@@ -130,7 +134,7 @@ For production deployment with Vercel frontend + ngrok backend, see [SETUP.md](S
 
 ## Configuration
 
-**Backend `.env`:** `API_KEY_HASH` (required), `JWT_SECRET` (required), `USER_NAME`, `DEBUG_AGENTS`, `MEMORY_BY`, `MAX_THINKING_TOKENS`, `FRONTEND_URL`
+**Backend `.env`:** `API_KEY_HASH` (required), `JWT_SECRET` (required), `USER_NAME`, `DEBUG_AGENTS`, `MEMORY_BY`, `FRONTEND_URL`
 
 **Frontend `.env`:** `VITE_API_BASE_URL` (default: http://localhost:8000)
 

@@ -17,7 +17,7 @@ import bcrypt
 def generate_hash():
     """Generate a bcrypt hash from user input."""
     print("=" * 60)
-    print("Claude Code Role Play Password Hash Generator")
+    print("ChitChats Password Hash Generator")
     print("=" * 60)
     print()
     print("This script will generate a bcrypt hash for your password.")

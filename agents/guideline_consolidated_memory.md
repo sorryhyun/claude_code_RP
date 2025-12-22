@@ -186,7 +186,7 @@ Alice was nine when she found her mother unconscious in the bathroom, pill bottl
 
 ## 메모리 시스템과의 연동
 
-Claude Code Role Play는 두 가지 메모리 모드를 지원한다:
+ChitChats는 두 가지 메모리 모드를 지원한다:
 
 ### RECALL 모드 (`MEMORY_BY=RECALL`)
 - 에이전트가 필요할 때 `recall` 도구로 특정 기억을 검색

@@ -5,38 +5,17 @@ This module provides functions for creating and configuring the FastAPI applicat
 with all necessary middleware, routers, and dependencies.
 """
 
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import crud
 from background_scheduler import BackgroundScheduler
 from database import get_db, init_db
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi_mcp import FastApiMCP
 from orchestration import ChatOrchestrator
 from sdk import AgentManager
-from starlette.responses import FileResponse
 
 from core import get_logger, get_settings
-
-
-def get_static_dir() -> Path | None:
-    """Get the path to the built frontend static files."""
-    # When running as PyInstaller bundle, static files are in _MEIPASS
-    if getattr(sys, "frozen", False):
-        base_path = Path(sys._MEIPASS)
-        static_dir = base_path / "static"
-        if static_dir.exists():
-            return static_dir
-
-    # Development: check for frontend/dist
-    dev_static = Path(__file__).parent.parent.parent / "frontend" / "dist"
-    if dev_static.exists():
-        return dev_static
-
-    return None
-
 
 logger = get_logger("AppFactory")
 
@@ -50,7 +29,7 @@ def create_app() -> FastAPI:
     """
     from auth import AuthMiddleware
     from fastapi.middleware.cors import CORSMiddleware
-    from routers import agent_management, agents, auth, debug, messages, room_agents, rooms
+    from routers import agent_management, agents, auth, debug, mcp_tools, messages, room_agents, rooms
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
     from slowapi.util import get_remote_address
@@ -65,7 +44,7 @@ def create_app() -> FastAPI:
         logger.info("🚀 Application startup...")
 
         # Validate configuration files
-        from config.config_loader import log_config_validation
+        from sdk.config import log_config_validation
 
         log_config_validation()
 
@@ -94,7 +73,6 @@ def create_app() -> FastAPI:
         app.state.agent_manager = agent_manager
         app.state.chat_orchestrator = chat_orchestrator
         app.state.background_scheduler = background_scheduler
-        app.state.background_tasks = set()  # Track fire-and-forget tasks
 
         # Seed agents from config files
         async for db in get_db():
@@ -111,20 +89,6 @@ def create_app() -> FastAPI:
         # Shutdown
         logger.info("🛑 Application shutdown...")
         background_scheduler.stop()
-
-        # Wait for background tasks to complete (with timeout)
-        if app.state.background_tasks:
-            import asyncio
-
-            logger.info(f"⏳ Waiting for {len(app.state.background_tasks)} background tasks...")
-            done, pending = await asyncio.wait(app.state.background_tasks, timeout=5.0)
-            if pending:
-                logger.warning(f"⚠️ Cancelling {len(pending)} pending background tasks")
-                for task in pending:
-                    task.cancel()
-
-        # Shutdown orchestrator (cancels active room tasks)
-        await chat_orchestrator.shutdown()
         await agent_manager.shutdown()
         logger.info("✅ Application shutdown complete")
 
@@ -132,11 +96,15 @@ def create_app() -> FastAPI:
     limiter = Limiter(key_func=get_remote_address)
 
     # Create app with lifespan
-    app = FastAPI(title="Claude Code Role Play API", lifespan=lifespan)
+    app = FastAPI(title="ChitChats API", lifespan=lifespan)
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # CORS middleware
+    # Add authentication middleware FIRST (will process after CORS)
+    app.add_middleware(AuthMiddleware)
+
+    # CORS middleware added LAST (processes requests FIRST in Starlette)
+    # This ensures preflight OPTIONS requests are handled before auth
     allowed_origins = settings.get_cors_origins()
     logger.info("🔒 CORS Configuration:")
     logger.info(f"   Allowed origins: {allowed_origins}")
@@ -150,14 +118,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Add authentication middleware
-    app.add_middleware(AuthMiddleware)
-
-    # Add request ID middleware for log correlation
-    from middleware import RequestIDMiddleware
-
-    app.add_middleware(RequestIDMiddleware)
-
     # Register routers
     # IMPORTANT: agent_management must come before agents to ensure /agents/configs
     # matches before /agents/{agent_id} (more specific routes before generic ones)
@@ -168,30 +128,18 @@ def create_app() -> FastAPI:
     app.include_router(room_agents.router, prefix="/rooms", tags=["Room-Agents"])
     app.include_router(messages.router, prefix="/rooms", tags=["Messages"])
     app.include_router(debug.router, prefix="/debug", tags=["Debug"])
+    app.include_router(mcp_tools.router, tags=["MCP Tools"])
 
-    # Add health check to root
-    app.include_router(auth.router, tags=["Health"])
-
-    # Mount static files for bundled frontend (production/packaged mode)
-    static_dir = get_static_dir()
-    if static_dir:
-        logger.info(f"📦 Serving static frontend from: {static_dir}")
-
-        # Serve static assets (js, css, images)
-        assets_dir = static_dir / "assets"
-        if assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-
-        # Catch-all route for SPA - serve index.html for non-API routes
-        @app.get("/{full_path:path}")
-        async def serve_spa(full_path: str):
-            """Serve the SPA for all non-API routes."""
-            # Don't serve SPA for API routes (they're already handled by routers)
-            if full_path.startswith(("auth", "rooms", "agents", "debug")):
-                return None
-            index_file = static_dir / "index.html"
-            if index_file.exists():
-                return FileResponse(str(index_file))
-            return {"error": "Frontend not found"}
+    # Mount MCP server - exposes simplified tools for easy LLM integration
+    # Only expose "MCP Tools" tag with clean, semantic tool names
+    mcp = FastApiMCP(
+        app,
+        name="ChitChats",
+        description="Chat with AI agents. Use 'list_agents' to see available agents, then 'chat' to talk with them.",
+        include_tags=["MCP Tools"],  # Only expose simplified MCP tools
+        headers=["authorization", "x-api-key"],  # Forward auth headers to API calls
+    )
+    mcp.mount()
+    logger.info("🔌 MCP server mounted at /mcp (5 simplified tools)")
 
     return app

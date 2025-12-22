@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { api, getApiKey } from '../utils/api';
+import { api } from '../services';
+import { useAuth } from '../contexts/AuthContext';
 import type { Agent, AgentCreate } from '../types';
 
-const POLL_INTERVAL = 2000; // Poll every 2 seconds
+const POLL_INTERVAL = 10000; // Poll every 10 seconds (agents change infrequently)
 
 export const useAgents = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const apiKey = getApiKey();
+  const { apiKey } = useAuth();
 
   const fetchAgents = useCallback(async (isInitial = false) => {
     try {
@@ -60,15 +61,55 @@ export const useAgents = () => {
 
     let isActive = true;
 
+    const doFetch = async (isInitial = false) => {
+      try {
+        if (isInitial) {
+          setLoading(true);
+        }
+        setError(null);
+        const data = await api.getAllAgents();
+
+        // Only update state if agents have actually changed
+        setAgents((prevAgents) => {
+          // Check if data is different
+          if (prevAgents.length !== data.length) {
+            return data;
+          }
+
+          // Check if any agent has changed
+          const hasChanges = data.some((newAgent) => {
+            const prevAgent = prevAgents.find(a => a.id === newAgent.id);
+            if (!prevAgent) return true;
+
+            // Compare relevant properties
+            return (
+              prevAgent.name !== newAgent.name ||
+              prevAgent.profile_pic !== newAgent.profile_pic ||
+              prevAgent.config_file !== newAgent.config_file
+            );
+          });
+
+          return hasChanges ? data : prevAgents;
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch agents');
+        console.error('Failed to fetch agents:', err);
+      } finally {
+        if (isInitial) {
+          setLoading(false);
+        }
+      }
+    };
+
     // Initial fetch
-    fetchAgents(true);
+    doFetch(true);
 
     // Setup polling using setTimeout to prevent stacking
     const scheduleNextPoll = () => {
       if (!isActive) return;
 
       pollIntervalRef.current = setTimeout(async () => {
-        await fetchAgents(false);
+        await doFetch(false);
         scheduleNextPoll(); // Schedule next poll after this one completes
       }, POLL_INTERVAL);
     };
@@ -83,7 +124,7 @@ export const useAgents = () => {
         pollIntervalRef.current = null;
       }
     };
-  }, [apiKey, fetchAgents]);
+  }, [apiKey]);
 
   const createAgent = async (agentData: AgentCreate): Promise<Agent> => {
     try {

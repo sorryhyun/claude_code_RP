@@ -79,3 +79,26 @@ async def verify_auth(request: Request):
 async def health_check():
     """Health check endpoint (no auth required)."""
     return {"status": "healthy"}
+
+
+@router.get("/health/pool")
+async def pool_stats(request: Request):
+    """Get client pool statistics (for debugging)."""
+    agent_manager = request.app.state.agent_manager
+    pool = agent_manager.client_pool
+    pool_keys = list(pool.pool.keys())
+    cleanup_tasks = len(pool._cleanup_tasks)
+
+    # Get semaphore availability (how many slots are free for new connections)
+    semaphore = pool._connection_semaphore
+    # Note: _value is internal but useful for debugging
+    available_slots = getattr(semaphore, '_value', 'unknown')
+
+    return {
+        "pool_size": len(pool_keys),
+        "pool_keys": [str(k) for k in pool_keys],
+        "pending_cleanup_tasks": cleanup_tasks,
+        "active_clients": len(agent_manager.active_clients),
+        "connection_semaphore_available": available_slots,
+        "max_concurrent_connections": pool.MAX_CONCURRENT_CONNECTIONS,
+    }
