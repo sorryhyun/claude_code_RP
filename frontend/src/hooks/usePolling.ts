@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Message } from '../types';
-import { getApiKey } from '../services';
+import { getApiKey, API_BASE_URL } from '../services';
 
 interface UsePollingReturn {
   messages: Message[];
@@ -10,9 +10,8 @@ interface UsePollingReturn {
   resetMessages: () => Promise<void>;
 }
 
-const POLL_INTERVAL = 2000; // Poll every 5 seconds
-const STATUS_POLL_INTERVAL = 1500; // Poll agent status every 3 seconds (faster for typing indicators)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
+const POLL_INTERVAL = 2000; // Poll every 2 seconds
+const STATUS_POLL_INTERVAL = 1500; // Poll agent status every 1.5 seconds (faster for typing indicators)
 
 export const usePolling = (roomId: number | null): UsePollingReturn => {
   const [messages, setMessages] = useState<Message[]>([]);

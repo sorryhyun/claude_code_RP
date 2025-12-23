@@ -1,7 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { setApiKey as setGlobalApiKey } from '../services';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
+import { setApiKey as setGlobalApiKey, API_BASE_URL } from '../services';
 const API_KEY_STORAGE_KEY = 'chitchats_api_key';
 
 interface AuthContextType {

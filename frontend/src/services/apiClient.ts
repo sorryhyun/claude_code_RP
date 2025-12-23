@@ -15,6 +15,14 @@ function getApiUrl(): string {
     }
   }
 
+  // Check if running in bundled mode (frontend served from backend on port 8000)
+  // In this case, use the same origin for API calls
+  const currentPort = window.location.port;
+  if (currentPort === '8000') {
+    // Bundled mode: frontend and backend on same origin
+    return window.location.origin;
+  }
+
   // Auto-detect based on current window location
   // If accessing via network IP, use network IP for backend too
   const currentHost = window.location.hostname;
@@ -22,7 +30,7 @@ function getApiUrl(): string {
     return `http://${currentHost}:8001`;
   }
 
-  // Default to localhost
+  // Default to localhost (development mode with separate frontend server)
   return 'http://localhost:8001';
 }
 
