@@ -59,14 +59,24 @@ async def get_agent_profile_pic(agent_name: str):
     For legacy single-file configs:
     - agents/{agent_name}.{png,jpg,jpeg,gif,webp,svg}
     """
+    import sys
+
     # Validate agent name to prevent path traversal attacks
     if not VALID_AGENT_NAME_PATTERN.match(agent_name) or ".." in agent_name:
         raise HTTPException(status_code=400, detail="Invalid agent name")
 
-    # Get the project root directory (parent of backend/)
-    backend_dir = Path(__file__).parent.parent
-    project_root = backend_dir.parent
-    agents_dir = project_root / "agents"
+    # Get the agents directory
+    if getattr(sys, "frozen", False):
+        # Bundled mode: agents are in working directory (copied from bundle on first run)
+        agents_dir = Path.cwd() / "agents"
+        # Also try the bundled location as fallback
+        bundled_agents_dir = Path(sys._MEIPASS) / "agents"
+    else:
+        # Development mode: agents are in project root
+        backend_dir = Path(__file__).parent.parent
+        project_root = backend_dir.parent
+        agents_dir = project_root / "agents"
+        bundled_agents_dir = None
 
     # Common image extensions
     image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
@@ -115,6 +125,22 @@ async def get_agent_profile_pic(agent_name: str):
         pic_path = agents_dir / f"{agent_name}{ext}"
         if pic_path.exists():
             return FileResponse(pic_path, headers=cache_headers)
+
+    # In bundled mode, also check the bundled agents directory as fallback
+    if bundled_agents_dir and bundled_agents_dir.exists():
+        # Try direct agent folder in bundled location
+        agent_folder = bundled_agents_dir / agent_name
+        pic_path = find_profile_pic_in_folder(agent_folder)
+        if pic_path:
+            return FileResponse(pic_path, headers=cache_headers)
+
+        # Try group folders in bundled location
+        for group_folder in bundled_agents_dir.glob("group_*"):
+            if group_folder.is_dir():
+                agent_in_group = group_folder / agent_name
+                pic_path = find_profile_pic_in_folder(agent_in_group)
+                if pic_path:
+                    return FileResponse(pic_path, headers=cache_headers)
 
     # No profile picture found
     raise HTTPException(status_code=404, detail="Profile picture not found")
