@@ -263,10 +263,27 @@ class AuthMiddleware:
     # Path prefixes that don't require authentication
     EXCLUDED_PREFIXES = (
         "/mcp",  # MCP endpoint (handles its own auth via MCP protocol)
+        "/assets",  # Static assets (JS, CSS, images) for bundled mode
+    )
+
+    # API path prefixes (routes that require authentication)
+    API_PREFIXES = (
+        "/auth/",
+        "/rooms/",
+        "/agents/",
+        "/debug/",
     )
 
     def __init__(self, app):
         self.app = app
+
+    def _is_api_route(self, path: str) -> bool:
+        """Check if path is an API route that requires authentication."""
+        # Exact API paths
+        if path in {"/auth/login", "/auth/health"}:
+            return False  # These are excluded from auth
+        # API prefixes
+        return path.startswith(self.API_PREFIXES)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -282,13 +299,18 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Skip auth for excluded prefixes (like /mcp)
+        # Skip auth for excluded prefixes (like /mcp, /assets)
         if path.startswith(self.EXCLUDED_PREFIXES):
             await self.app(scope, receive, send)
             return
 
         # Skip auth for profile picture requests (needed for <img> tags)
         if path.startswith("/agents/") and path.endswith("/profile-pic"):
+            await self.app(scope, receive, send)
+            return
+
+        # In bundled mode, skip auth for non-API routes (frontend SPA routes)
+        if getattr(sys, "frozen", False) and not self._is_api_route(path):
             await self.app(scope, receive, send)
             return
 

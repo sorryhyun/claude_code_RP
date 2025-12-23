@@ -23,6 +23,8 @@ frontend/.env.production.local
 *.swp
 *.swo
 *~
+dist/
+build/
 
 # OS
 .DS_Store
