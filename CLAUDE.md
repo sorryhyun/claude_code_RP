@@ -47,7 +47,7 @@ uv run pytest --cov=backend --cov-report=term-missing
   - Recent events auto-update based on conversation history
   - Agents continue conversations in background when user is not in room
   - Cached database queries and filesystem reads (70-90% performance improvement)
-  - Modular tool architecture (action_tools, guidelines_tools, brain_tools)
+  - Modular tool architecture (action_tools, guidelines_tools)
 
 **For detailed backend documentation**, see [backend/README.md](backend/README.md) which includes:
 - Complete API reference
@@ -293,8 +293,7 @@ debug:
 **Optional:**
 - `USER_NAME` - Display name for user messages in chat (default: "User")
 - `DEBUG_AGENTS` - Set to "true" for verbose agent logging
-- `MEMORY_BY` - Memory system mode: `RECALL` (on-demand retrieval, default) or `BRAIN` (automatic surfacing)
-- `RECALL_MEMORY_FILE` - Memory file for recall mode: `consolidated_memory` (default) or `long_term_memory`
+- `RECALL_MEMORY_FILE` - Memory file for recall tool: `consolidated_memory` (default) or `long_term_memory`
 - `READ_GUIDELINE_BY` - Guideline delivery mode: `active_tool` (default) or `description`
 - `USE_HAIKU` - Set to "true" to use Haiku model instead of Opus (default: false)
 - `PRIORITY_AGENTS` - Comma-separated agent names for priority responding
@@ -302,10 +301,6 @@ debug:
 - `ENABLE_GUEST_LOGIN` - Enable/disable guest login (default: true)
 - `FRONTEND_URL` - CORS allowed origin for production (e.g., `https://your-app.vercel.app`)
 - `VERCEL_URL` - Auto-detected on Vercel deployments
-
-**Deprecated (use `MEMORY_BY` instead):**
-- `ENABLE_MEMORY_TOOL` - Deprecated, use `MEMORY_BY=RECALL` or `MEMORY_BY=BRAIN`
-- `ENABLE_RECALL_TOOL` - Deprecated, use `MEMORY_BY=RECALL`
 
 **Claude Agent SDK:**
 - Authentication is handled by the Claude Agent SDK when running through Claude Code with an active subscription

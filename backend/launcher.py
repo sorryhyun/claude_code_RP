@@ -144,9 +144,6 @@ API_KEY_HASH={config["password_hash"]}
 # JWT Secret (auto-generated)
 JWT_SECRET={config["jwt_secret"]}
 
-# Memory System Mode: RECALL (on-demand) or BRAIN (automatic)
-MEMORY_BY=RECALL
-
 # Set to "true" for debug logging
 DEBUG_AGENTS=false
 """

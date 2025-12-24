@@ -69,22 +69,9 @@ See [SIMULATIONS.md](SIMULATIONS.md) and [SETUP.md](SETUP.md) for details.
 
 ## Agent Configuration
 
-Agents are configured using a folder-based structure in the `agents/` directory:
+Agents use a folder-based structure in `agents/` with markdown files for personality and memories. All changes are hot-reloaded without restart.
 
-```
-agents/
-  agent_name/
-    ├── in_a_nutshell.md       # Brief identity summary (third-person)
-    ├── characteristics.md      # Personality traits (third-person)
-    ├── recent_events.md       # Auto-updated from conversations
-    ├── anti_pattern.md        # Behaviors to avoid (optional)
-    ├── consolidated_memory.md # Long-term memories with subtitles (optional)
-    └── profile.*              # Optional profile picture (png, jpg, jpeg, gif, webp, svg)
-```
-
-Add optional profile pictures (png, jpg, jpeg, gif, webp, svg) to agent folders. Changes take effect immediately without restart.
-
-**Tool Configuration:** Agent behavior guidelines and debug settings are configured via YAML files in `backend/config/tools/`. Switch between guideline versions or enable debug logging without code changes. See [CLAUDE.md](CLAUDE.md) for details.
+See [CLAUDE.md](CLAUDE.md) for detailed configuration options including third-person perspective requirements, tool configuration, and group behavior settings.
 
 ## Commands
 
@@ -97,30 +84,9 @@ make clean         # Clean build artifacts
 
 ## API
 
-**Authentication:**
-- `POST /auth/login` - Login with password, returns JWT token
-- `GET /auth/verify` - Verify current JWT token
+Core endpoints for authentication, rooms, agents, and messaging. All endpoints except `/auth/*` and `/health` require JWT authentication via `X-API-Key` header.
 
-**Rooms:**
-- `POST /rooms` - Create room
-- `GET /rooms` - List all rooms
-- `GET /rooms/{id}` - Get room details
-- `DELETE /rooms/{id}` - Delete room
-
-**Agents:**
-- `GET /agents` - List agents
-- `POST /agents` - Create agent from config
-- `GET /agents/{id}/direct-room` - Get 1-on-1 room
-- `PATCH /agents/{id}` - Update agent persona
-- `GET /agents/{name}/profile-pic` - Get agent profile picture
-
-**Messages & Polling:**
-- `GET /rooms/{id}/messages/poll?since_id={id}` - Poll for new messages (rate limited: 60/min)
-- `POST /rooms/{id}/messages/send` - Send message and trigger agent responses (rate limited: 30/min)
-- `GET /rooms/{id}/chatting-agents` - Get list of agents currently responding (rate limited: 120/min)
-- `DELETE /rooms/{id}/messages` - Clear all messages (Admin only)
-
-See [backend/README.md](backend/README.md) for full API reference and [SETUP.md](SETUP.md) for auth details.
+See [backend/README.md](backend/README.md) for the full API reference.
 
 ## Deployment
 
@@ -134,8 +100,6 @@ For production deployment with Vercel frontend + ngrok backend, see [SETUP.md](S
 
 ## Configuration
 
-**Backend `.env`:** `API_KEY_HASH` (required), `JWT_SECRET` (required), `USER_NAME`, `DEBUG_AGENTS`, `MEMORY_BY`, `FRONTEND_URL`
+**Required:** `API_KEY_HASH`, `JWT_SECRET` in backend `.env` file.
 
-**Frontend `.env`:** `VITE_API_BASE_URL` (default: http://localhost:8000)
-
-See [SETUP.md](SETUP.md) and [backend/README.md](backend/README.md) for details.
+See [SETUP.md](SETUP.md) for authentication setup and [backend/README.md](backend/README.md) for all configuration options.

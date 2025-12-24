@@ -41,7 +41,6 @@ JWT_SECRET=<secret from step 2>
 ```env
 USER_NAME=User                    # Display name for user messages
 DEBUG_AGENTS=false                # Enable verbose agent logging
-MEMORY_BY=RECALL                  # Memory system: RECALL or BRAIN
 FRONTEND_URL=https://your-app.vercel.app  # CORS for production
 ```
 
@@ -226,8 +225,6 @@ All scripts are now organized in `scripts/` directory:
 **Update tool descriptions:** Edit YAML files in `backend/config/tools/` (changes apply immediately)
 
 **Enable debug logging:** Set `DEBUG_AGENTS=true` in `.env` or edit `backend/config/tools/debug.yaml`
-
-**Switch memory mode:** Set `MEMORY_BY=RECALL` or `MEMORY_BY=BRAIN` in `.env`, restart backend
 
 **Add database field:** Update `models.py`, add migration in `backend/utils/migrations.py`, update `schemas.py` and `crud.py`, restart
 

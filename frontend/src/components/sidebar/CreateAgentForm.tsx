@@ -21,6 +21,7 @@ export const CreateAgentForm = ({
   const [createMode, setCreateMode] = useState<'config' | 'custom'>('config');
   const [newAgent, setNewAgent] = useState({
     name: '',
+    group: '',
     config_file: '',
     in_a_nutshell: '',
     characteristics: '',
@@ -40,6 +41,7 @@ export const CreateAgentForm = ({
         ? { name: newAgent.name, config_file: newAgent.config_file }
         : {
             name: newAgent.name,
+            group: newAgent.group || null,
             in_a_nutshell: newAgent.in_a_nutshell || null,
             characteristics: newAgent.characteristics || null,
             backgrounds: newAgent.backgrounds || null,
@@ -50,6 +52,7 @@ export const CreateAgentForm = ({
       await onCreateAgent(agentData);
       setNewAgent({
         name: '',
+        group: '',
         config_file: '',
         in_a_nutshell: '',
         characteristics: '',
@@ -127,6 +130,12 @@ export const CreateAgentForm = ({
           </>
         ) : (
           <div className="space-y-2">
+            <Input
+              type="text"
+              value={newAgent.group}
+              onChange={(e) => setNewAgent({ ...newAgent, group: e.target.value })}
+              placeholder={t('groupPlaceholder')}
+            />
             <Textarea
               value={newAgent.in_a_nutshell}
               onChange={(e) => setNewAgent({ ...newAgent, in_a_nutshell: e.target.value })}

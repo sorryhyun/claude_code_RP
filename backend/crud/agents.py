@@ -13,15 +13,28 @@ from domain.agent_config import AgentConfigData
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from .helpers import merge_agent_configs, save_base64_profile_pic
+from .helpers import merge_agent_configs, persist_agent_to_filesystem, save_base64_profile_pic
 
 logger = logging.getLogger("CRUD")
 
 
 async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> models.Agent:
     """Create an agent as an independent entity (not tied to any room initially)."""
+    config_file = agent.config_file
+
+    # If no config_file provided but custom fields are given, persist to filesystem first
+    if not config_file and (agent.in_a_nutshell or agent.characteristics):
+        config_file = persist_agent_to_filesystem(
+            agent_name=agent.name,
+            group=agent.group,
+            in_a_nutshell=agent.in_a_nutshell or "",
+            characteristics=agent.characteristics or "",
+            recent_events=agent.recent_events,
+            profile_pic_base64=agent.profile_pic if agent.profile_pic and agent.profile_pic.startswith("data:") else None,
+        )
+
     # Parse config file if provided to populate fields
-    file_config = parse_agent_config(agent.config_file) if agent.config_file else None
+    file_config = parse_agent_config(config_file) if config_file else None
 
     # Create AgentConfigData from provided values
     provided_config = AgentConfigData(
@@ -33,6 +46,9 @@ async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> models.A
 
     # For profile_pic: use provided value, or fall back to file config
     profile_pic = agent.profile_pic
+    # Clear base64 data from DB field if saved to filesystem
+    if profile_pic and profile_pic.startswith("data:"):
+        profile_pic = None
     if not profile_pic and file_config:
         profile_pic = file_config.profile_pic
 
@@ -61,7 +77,7 @@ async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> models.A
     db_agent = models.Agent(
         name=agent.name,
         group=agent.group,
-        config_file=agent.config_file,
+        config_file=config_file,
         profile_pic=profile_pic,
         in_a_nutshell=final_config.in_a_nutshell,
         characteristics=final_config.characteristics,

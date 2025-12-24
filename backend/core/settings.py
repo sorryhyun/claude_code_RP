@@ -339,8 +339,8 @@ class Settings(BaseSettings):
 
         if self.enable_recall_tool:
             logger.warning(
-                "ENABLE_RECALL_TOOL is deprecated. Please use MEMORY_BY=RECALL instead. "
-                "See .env.example for migration guide."
+                "ENABLE_RECALL_TOOL is deprecated and can be removed. "
+                "The recall tool is now always enabled."
             )
 
         if self.enable_memory_tool:

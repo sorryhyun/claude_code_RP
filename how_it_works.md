@@ -204,8 +204,8 @@ All configuration is hot-reloaded (no restart needed):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MEMORY_BY` | Memory mode: `RECALL` or `BRAIN` | `RECALL` |
 | `USE_HAIKU` | Use Haiku model instead of Opus | `false` |
+| `RECALL_MEMORY_FILE` | Memory file for recall tool | `consolidated_memory` |
 
 ---
 

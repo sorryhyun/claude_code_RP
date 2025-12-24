@@ -9,7 +9,7 @@ conversation_context:
   # Closing tag for conversation context
   footer: "</conversation_so_far>"
 
-  # Recall tool reminder (only shown when MEMORY_BY=RECALL)
+  # Recall tool reminder
   recall_reminder: ""
 
   response_instruction:  |

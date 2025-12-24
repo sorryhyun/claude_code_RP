@@ -29,7 +29,6 @@ See [../SETUP.md](../SETUP.md) for authentication setup.
 **Key Features:**
 - Filesystem-primary configuration with hot-reloading
 - Multi-agent orchestration with interruption support
-- Memory-brain system for intelligent long-term memory retrieval
 - Room-specific conversation sessions per agent
 - In-memory caching (70-90% performance improvement)
 
@@ -290,8 +289,7 @@ All endpoints except `/auth/*`, `/health`, `/docs`, and profile pictures require
 **Optional:**
 - `USER_NAME` - Display name for user messages (default: "User")
 - `DEBUG_AGENTS` - "true" for verbose logging
-- `MEMORY_BY` - Memory mode: `RECALL` (default) or `BRAIN`
-- `RECALL_MEMORY_FILE` - Memory file for recall mode: `consolidated_memory` (default) or `long_term_memory`
+- `RECALL_MEMORY_FILE` - Memory file for recall tool: `consolidated_memory` (default) or `long_term_memory`
 - `READ_GUIDELINE_BY` - Guideline delivery mode: `active_tool` (default) or `description`
 - `USE_HAIKU` - "true" to use Haiku model instead of Opus (default: false)
 - `PRIORITY_AGENTS` - Comma-separated agent names for priority responding
@@ -355,11 +353,6 @@ All endpoints except `/auth/*`, `/health`, `/docs`, and profile pictures require
 - New user messages cancel ongoing processing
 - `last_user_message_time` timestamp comparison
 - Background tasks tracked per room
-
-**Memory Integration:**
-- Memory-brain called before agent response (if configured)
-- Selected memories injected into context
-- 10-turn cooldown prevents repetition
 
 ## Debugging
 
