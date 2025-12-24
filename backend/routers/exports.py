@@ -38,10 +38,14 @@ def get_claude_projects_dirs() -> List[Path]:
 
     Supports Windows native, WSL, and Linux/macOS paths.
     On WSL, checks both native Linux path and Windows user paths.
+    On Windows, also derives user directory from temp path for bundled exe support.
 
     Returns:
         List of existing .claude/projects directories
     """
+    import os
+    import tempfile
+
     candidates = []
 
     # Check native home directory first (works on all platforms)
@@ -52,13 +56,28 @@ def get_claude_projects_dirs() -> List[Path]:
 
     if system == "Windows":
         # Windows native - also check common user directories
-        import os
         # Check USERPROFILE if different from home
         userprofile = os.environ.get("USERPROFILE")
         if userprofile:
             userprofile_path = Path(userprofile) / ".claude" / "projects"
             if userprofile_path not in candidates:
                 candidates.append(userprofile_path)
+
+        # In bundled mode, derive user directory from temp path
+        # Temp path is typically C:\Users\{username}\AppData\Local\Temp
+        temp_dir = Path(tempfile.gettempdir())
+        try:
+            # Navigate up from temp to find Users directory
+            # C:\Users\username\AppData\Local\Temp -> C:\Users\username
+            parts = temp_dir.parts
+            if len(parts) >= 4 and parts[1].lower() == "users":
+                # Reconstruct user home from temp path
+                user_home = Path(parts[0]) / parts[1] / parts[2]
+                user_claude = user_home / ".claude" / "projects"
+                if user_claude not in candidates:
+                    candidates.append(user_claude)
+        except Exception:
+            pass
 
     elif system == "Linux" and "microsoft" in platform.release().lower():
         # WSL detected - check Windows user directories via /mnt/
